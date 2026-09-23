@@ -1,0 +1,378 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+enum UserRole {
+  OWNER
+  GENERAL_MANAGER
+  FRONT_DESK
+  EXECUTIVE_HOUSEKEEPER
+  HOUSEKEEPER
+  MAINTENANCE
+  INSPECTOR
+}
+
+enum RoomStatus {
+  VACANT_DIRTY
+  CLEANING
+  VACANT_CLEAN
+  INSPECTED
+  OCCUPIED
+  MAINTENANCE
+  OUT_OF_ORDER
+}
+
+enum CleaningStatus {
+  NOT_STARTED
+  IN_PROGRESS
+  COMPLETED
+  NEEDS_INSPECTION
+  INSPECTION_FAILED
+}
+
+enum TicketPriority {
+  LOW
+  MEDIUM
+  HIGH
+  URGENT
+}
+
+enum TicketStatus {
+  OPEN
+  ASSIGNED
+  WORKING
+  WAITING_PARTS
+  COMPLETED
+}
+
+enum InspectionStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+enum GuestRequestStatus {
+  OPEN
+  ASSIGNED
+  COMPLETED
+}
+
+enum MessageChannel {
+  FRONT_DESK_HOUSEKEEPING
+  MAINTENANCE_MANAGER
+  INSPECTOR_HOUSEKEEPER
+  GENERAL
+}
+
+enum StockAlertLevel {
+  OK
+  LOW
+  CRITICAL
+  REORDER
+}
+
+enum LaundryStatus {
+  DIRTY
+  WASHING
+  DRYING
+  READY
+  DELIVERED
+}
+
+enum LostFoundStatus {
+  STORED
+  CLAIMED
+  DISPOSED
+}
+
+enum PmsProvider {
+  SKYTOUCH
+  SYNXIS
+  OPERA
+  CLOUDBEDS
+  MEWS
+  STAYNTOUCH
+  AUTOCLERK
+  LITTLE_HOTELIER
+}
+
+enum PmsSyncStatus {
+  SUCCESS
+  PARTIAL
+  FAILED
+}
+
+model Hotel {
+  id        String   @id @default(cuid())
+  name      String
+  floors    Int      @default(3)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  users              User[]
+  rooms              Room[]
+  maintenanceTickets MaintenanceTicket[]
+  guestRequests      GuestRequest[]
+  messages           Message[]
+  inventoryItems     InventoryItem[]
+  laundryBatches     LaundryBatch[]
+  lostFoundItems     LostFoundItem[]
+  pmsConnections     PmsConnection[]
+  pmsSyncLogs        PmsSyncLog[]
+}
+
+model User {
+  id           String   @id @default(cuid())
+  email        String   @unique
+  passwordHash String
+  name         String
+  role         UserRole
+  active       Boolean  @default(true)
+  hotelId      String
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  hotel              Hotel               @relation(fields: [hotelId], references: [id], onDelete: Cascade)
+  assignedRooms      Room[]              @relation("AssignedHousekeeper")
+  inspectedRooms     Room[]              @relation("AssignedInspector")
+  maintenanceTickets MaintenanceTicket[] @relation("AssignedTechnician")
+  inspections        Inspection[]
+  sentMessages       Message[]           @relation("SentMessages")
+  receivedMessages   Message[]           @relation("ReceivedMessages")
+  foundItems         LostFoundItem[]     @relation("FoundBy")
+  assignedRequests   GuestRequest[]      @relation("AssignedRequests")
+  pushSubscriptions  PushSubscription[]
+}
+
+model Room {
+  id              String         @id @default(cuid())
+  number          String
+  floor           Int
+  type            String         @default("Standard")
+  status          RoomStatus     @default(VACANT_DIRTY)
+  cleaningStatus  CleaningStatus @default(NOT_STARTED)
+  isVip           Boolean        @default(false)
+  isRush          Boolean        @default(false)
+  guestName       String?
+  arrivalDate     DateTime?
+  departureDate   DateTime?
+  guestNotes      String?
+  frontDeskNotes  String?
+  estimatedMinutes Int           @default(30)
+  priority        Int            @default(0)
+  manualLock      Boolean        @default(false)
+  cleaningStartedAt DateTime?
+  hotelId         String
+  housekeeperId   String?
+  inspectorId     String?
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
+
+  hotel              Hotel               @relation(fields: [hotelId], references: [id], onDelete: Cascade)
+  housekeeper        User?               @relation("AssignedHousekeeper", fields: [housekeeperId], references: [id])
+  inspector          User?               @relation("AssignedInspector", fields: [inspectorId], references: [id])
+  checklistItems     ChecklistItem[]
+  inspections        Inspection[]
+  maintenanceTickets MaintenanceTicket[]
+  guestRequests      GuestRequest[]
+  photos             RoomPhoto[]
+
+  @@unique([hotelId, number])
+}
+
+model ChecklistItem {
+  id        String   @id @default(cuid())
+  roomId    String
+  label     String
+  completed Boolean  @default(false)
+  needsAttention Boolean @default(false)
+  sortOrder Int      @default(0)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  room Room @relation(fields: [roomId], references: [id], onDelete: Cascade)
+}
+
+model Inspection {
+  id          String           @id @default(cuid())
+  roomId      String
+  inspectorId String
+  status      InspectionStatus @default(PENDING)
+  score       Int?
+  notes       String?
+  createdAt   DateTime         @default(now())
+  updatedAt   DateTime         @updatedAt
+
+  room      Room @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  inspector User @relation(fields: [inspectorId], references: [id])
+  items     InspectionItem[]
+}
+
+model InspectionItem {
+  id           String  @id @default(cuid())
+  inspectionId String
+  label        String
+  passed       Boolean @default(false)
+  sortOrder    Int     @default(0)
+
+  inspection Inspection @relation(fields: [inspectionId], references: [id], onDelete: Cascade)
+}
+
+model MaintenanceTicket {
+  id           String         @id @default(cuid())
+  roomId       String
+  hotelId      String
+  title        String
+  description  String?
+  priority     TicketPriority @default(MEDIUM)
+  status       TicketStatus   @default(OPEN)
+  photoUrl     String?
+  assignedToId String?
+  createdById  String?
+  createdAt    DateTime       @default(now())
+  updatedAt    DateTime       @updatedAt
+
+  room       Room  @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  hotel      Hotel @relation(fields: [hotelId], references: [id], onDelete: Cascade)
+  assignedTo User? @relation("AssignedTechnician", fields: [assignedToId], references: [id])
+}
+
+model GuestRequest {
+  id           String             @id @default(cuid())
+  roomId       String
+  hotelId      String
+  type         String
+  status       GuestRequestStatus @default(OPEN)
+  notes        String?
+  assignedToId String?
+  createdAt    DateTime           @default(now())
+  updatedAt    DateTime           @updatedAt
+
+  room       Room  @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  hotel      Hotel @relation(fields: [hotelId], references: [id], onDelete: Cascade)
+  assignedTo User? @relation("AssignedRequests", fields: [assignedToId], references: [id])
+}
+
+model InventoryItem {
+  id                String          @id @default(cuid())
+  hotelId           String
+  category          String
+  quantity          Int             @default(0)
+  reorderThreshold  Int             @default(20)
+  criticalThreshold Int             @default(10)
+  usagePerClean     Int             @default(1)
+  unit              String          @default("units")
+  createdAt         DateTime        @default(now())
+  updatedAt         DateTime        @updatedAt
+
+  hotel Hotel @relation(fields: [hotelId], references: [id], onDelete: Cascade)
+
+  @@unique([hotelId, category])
+}
+
+model LaundryBatch {
+  id        String        @id @default(cuid())
+  hotelId   String
+  itemType  String
+  quantity  Int           @default(0)
+  status    LaundryStatus @default(DIRTY)
+  notes     String?
+  createdAt DateTime      @default(now())
+  updatedAt DateTime      @updatedAt
+
+  hotel Hotel @relation(fields: [hotelId], references: [id], onDelete: Cascade)
+}
+
+model LostFoundItem {
+  id          String          @id @default(cuid())
+  hotelId     String
+  roomNumber  String?
+  guestName   String?
+  foundById   String?
+  description String
+  storageBin  String?
+  photoUrl    String?
+  status      LostFoundStatus @default(STORED)
+  foundAt     DateTime        @default(now())
+  createdAt   DateTime        @default(now())
+  updatedAt   DateTime        @updatedAt
+
+  hotel   Hotel @relation(fields: [hotelId], references: [id], onDelete: Cascade)
+  foundBy User? @relation("FoundBy", fields: [foundById], references: [id])
+}
+
+model Message {
+  id         String         @id @default(cuid())
+  hotelId    String
+  senderId   String
+  receiverId String?
+  channel    MessageChannel @default(GENERAL)
+  content    String
+  roomId     String?
+  read       Boolean        @default(false)
+  createdAt  DateTime       @default(now())
+
+  hotel    Hotel @relation(fields: [hotelId], references: [id], onDelete: Cascade)
+  sender   User  @relation("SentMessages", fields: [senderId], references: [id])
+  receiver User? @relation("ReceivedMessages", fields: [receiverId], references: [id])
+}
+
+model RoomPhoto {
+  id        String   @id @default(cuid())
+  roomId    String
+  url       String
+  caption   String?
+  type      String   @default("general")
+  createdAt DateTime @default(now())
+
+  room Room @relation(fields: [roomId], references: [id], onDelete: Cascade)
+}
+
+model PmsConnection {
+  id                   String      @id @default(cuid())
+  hotelId              String
+  provider             PmsProvider
+  propertyId           String?
+  apiKey               String?
+  apiSecret            String?
+  baseUrl              String?
+  enabled              Boolean     @default(false)
+  syncIntervalMinutes  Int         @default(15)
+  conflictPolicy       String      @default("PMS_RESERVATIONS_ONLY")
+  lastSyncAt           DateTime?
+  createdAt            DateTime    @default(now())
+  updatedAt            DateTime    @updatedAt
+
+  hotel Hotel @relation(fields: [hotelId], references: [id], onDelete: Cascade)
+
+  @@unique([hotelId, provider])
+}
+
+model PmsSyncLog {
+  id        String        @id @default(cuid())
+  hotelId   String
+  provider  PmsProvider
+  action    String
+  records   Int           @default(0)
+  status    PmsSyncStatus @default(SUCCESS)
+  message   String?
+  createdAt DateTime      @default(now())
+
+  hotel Hotel @relation(fields: [hotelId], references: [id], onDelete: Cascade)
+}
+
+model PushSubscription {
+  id        String   @id @default(cuid())
+  userId    String
+  endpoint  String   @unique
+  p256dh    String
+  auth      String
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}

@@ -1,0 +1,8 @@
+Room,Room Type,Floor,Status,Housekeeper,Priority,Rush,VIP,Guest,Notes,Estimated Minutes
+101,Standard,1,Dirty,Maria Housekeeper,8,yes,no,,Early arrival pending,30
+108,Suite,1,Dirty,Maria Housekeeper,10,yes,yes,,VIP arriving 2pm,25
+201,Standard,2,Cleaning,Maria Housekeeper,4,no,no,,,40
+220,Deluxe,2,Dirty,Maria Housekeeper,5,no,no,,,35
+223,Standard,2,Dirty,Maria Housekeeper,7,yes,no,,Rush turn,35
+301,Standard,3,Dirty,,3,no,no,,Unassigned — leave blank to clear HK,30
+105,King,1,Clean,Maria Housekeeper,1,no,no,,Stayover done,20
