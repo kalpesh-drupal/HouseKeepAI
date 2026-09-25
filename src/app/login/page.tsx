@@ -1,6 +1,6 @@
 "use client";
 
-import { signIn, getSession } from "next-auth/react";
+import { signIn } from "next-auth/react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useState } from "react";
 import { Hotel, Loader2 } from "lucide-react";
@@ -48,11 +48,10 @@ function LoginForm() {
       return;
     }
 
-    const session = await getSession();
     const mobile =
       isMobileLoginRequest(searchParams.get("mobile"), searchParams.get("callbackUrl")) ||
       isMobileViewport();
-    router.push(mobile ? mobileHomeForRole(session?.user?.role) : desktopCallbackUrl(searchParams.get("callbackUrl")));
+    router.push(mobile ? mobileHomeForRole() : desktopCallbackUrl(searchParams.get("callbackUrl")));
     router.refresh();
   }
 

@@ -781,7 +781,7 @@ export async function applyHkListRows(
     });
 
     const roomType = normalizeRoomType(row.roomType);
-    let status = parseStatus(row.status);
+    const status = parseStatus(row.status);
     if (!status && row.status?.trim()) {
       if (unmappedStatusSamples.length < 8 && !unmappedStatusSamples.includes(row.status.trim())) {
         unmappedStatusSamples.push(row.status.trim());
