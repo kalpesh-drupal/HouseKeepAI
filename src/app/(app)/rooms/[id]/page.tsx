@@ -2,7 +2,7 @@ import { requireAuth } from "@/lib/session";
 import { getRoomById } from "@/lib/queries";
 import { prisma } from "@/lib/prisma";
 import { notFound } from "next/navigation";
-import { canAssignHousekeepers, ROOM_STATUS_CONFIG } from "@/lib/utils";
+import { canAssignHousekeepers, GUEST_STAY_CONFIG, ROOM_STATUS_CONFIG } from "@/lib/utils";
 import { RoomActions } from "@/components/room-actions";
 import { RoomQrCard } from "@/components/room-qr";
 import { RoomPhotoPanel } from "@/components/room-photo-panel";
@@ -57,6 +57,12 @@ export default async function RoomDetailsPage({ params }: { params: Promise<{ id
           <h2 className="mb-4 font-semibold">Guest Information</h2>
           <dl className="space-y-3 text-sm">
             <div className="flex justify-between"><dt className="text-muted-foreground">Guest</dt><dd className="font-medium">{room.guestName ?? "—"}</dd></div>
+            <div className="flex justify-between">
+              <dt className="text-muted-foreground">Guest status</dt>
+              <dd className={`rounded-full px-2 py-0.5 text-xs font-medium ${GUEST_STAY_CONFIG[room.guestStatus].className}`}>
+                {GUEST_STAY_CONFIG[room.guestStatus].label}
+              </dd>
+            </div>
             <div className="flex justify-between"><dt className="text-muted-foreground">Arrival</dt><dd>{room.arrivalDate ? new Date(room.arrivalDate).toLocaleDateString() : "—"}</dd></div>
             <div className="flex justify-between"><dt className="text-muted-foreground">Departure</dt><dd>{room.departureDate ? new Date(room.departureDate).toLocaleDateString() : "—"}</dd></div>
             <div className="flex justify-between"><dt className="text-muted-foreground">Cleaning Status</dt><dd className="font-medium">{room.cleaningStatus.replace(/_/g, " ")}</dd></div>

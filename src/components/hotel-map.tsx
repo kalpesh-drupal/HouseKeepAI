@@ -85,7 +85,7 @@ export function HotelMap({
       case "departure":
         return room.departureDate && room.departureDate >= today && room.departureDate < tomorrow;
       case "maintenance":
-        return room.status === RoomStatus.MAINTENANCE || room.status === RoomStatus.OUT_OF_ORDER;
+        return room.status === RoomStatus.MAINTENANCE || room.status === RoomStatus.OUT_OF_ORDER || room.status === RoomStatus.OUT_OF_INVENTORY;
       default:
         return true;
     }

@@ -1,7 +1,7 @@
 import { requireAuth } from "@/lib/session";
 import { getRoomsForUser } from "@/lib/queries";
 import Link from "next/link";
-import { ROOM_STATUS_CONFIG } from "@/lib/utils";
+import { GUEST_STAY_CONFIG, ROOM_STATUS_CONFIG } from "@/lib/utils";
 import { MobileRoomActions } from "@/components/mobile-room-actions";
 import { CleaningTimer } from "@/components/cleaning-timer";
 import { RoomCacheHydrator } from "@/components/room-cache-hydrator";
@@ -53,9 +53,12 @@ export default async function MobileHousekeepingPage() {
                   />
                 </Link>
                 <span className={`rounded-full px-2 py-1 text-xs ${cfg.bg} ${cfg.text}`}>
-                  {cfg.emoji} {cfg.label}
+                  HK: {cfg.label}
                 </span>
               </div>
+              <p className={`mb-2 inline-block rounded-full px-2 py-1 text-xs font-medium ${GUEST_STAY_CONFIG[room.guestStatus].className}`}>
+                Guest: {GUEST_STAY_CONFIG[room.guestStatus].label}
+              </p>
               <p className="mb-3 text-xs text-muted-foreground">
                 Priority {room.priority} · Est. {room.estimatedMinutes} min
                 {room.isVip ? " · VIP" : ""}

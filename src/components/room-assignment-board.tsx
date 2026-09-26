@@ -3,8 +3,8 @@
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { RoomStatus } from "@prisma/client";
-import { ROOM_STATUS_CONFIG, cn } from "@/lib/utils";
+import { GuestStayStatus, RoomStatus } from "@prisma/client";
+import { GUEST_STAY_CONFIG, ROOM_STATUS_CONFIG, cn } from "@/lib/utils";
 import { ApplyAiAssignmentsButton } from "@/components/apply-ai-assignments";
 import { AssignHousekeeperSelect, type HousekeeperOption } from "@/components/assign-housekeeper-select";
 
@@ -13,6 +13,7 @@ type AssignableRoom = {
   number: string;
   floor: number;
   status: RoomStatus;
+  guestStatus: GuestStayStatus;
   housekeeperId: string | null;
   housekeeperName: string | null;
   isVip: boolean;
@@ -226,7 +227,8 @@ export function RoomAssignmentBoard({
               </th>
               <th className="px-3 py-2">Room</th>
               <th className="px-3 py-2">Floor</th>
-              <th className="px-3 py-2">Status</th>
+              <th className="px-3 py-2">HK status</th>
+              <th className="px-3 py-2">Guest status</th>
               <th className="px-3 py-2">Housekeeper</th>
             </tr>
           </thead>
@@ -262,6 +264,11 @@ export function RoomAssignmentBoard({
                     </span>
                   </td>
                   <td className="px-3 py-2">
+                    <span className={cn("rounded-full px-2 py-0.5 text-xs font-medium", GUEST_STAY_CONFIG[room.guestStatus].className)}>
+                      {GUEST_STAY_CONFIG[room.guestStatus].label}
+                    </span>
+                  </td>
+                  <td className="px-3 py-2">
                     <AssignHousekeeperSelect
                       roomId={room.id}
                       housekeeperId={room.housekeeperId}
@@ -280,7 +287,7 @@ export function RoomAssignmentBoard({
             })}
             {filtered.length === 0 && (
               <tr>
-                <td colSpan={5} className="px-3 py-8 text-center text-muted-foreground">
+                <td colSpan={6} className="px-3 py-8 text-center text-muted-foreground">
                   No rooms match this filter.
                 </td>
               </tr>

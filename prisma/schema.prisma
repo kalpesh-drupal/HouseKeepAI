@@ -25,6 +25,16 @@ enum RoomStatus {
   OCCUPIED
   MAINTENANCE
   OUT_OF_ORDER
+  OUT_OF_INVENTORY
+}
+
+enum GuestStayStatus {
+  VACANT
+  OCCUPIED
+  DEPARTING
+  STAYOVER
+  ARRIVING
+  MAINTENANCE
 }
 
 enum CleaningStatus {
@@ -155,6 +165,7 @@ model Room {
   floor           Int
   type            String         @default("Standard")
   status          RoomStatus     @default(VACANT_DIRTY)
+  guestStatus     GuestStayStatus @default(VACANT)
   cleaningStatus  CleaningStatus @default(NOT_STARTED)
   isVip           Boolean        @default(false)
   isRush          Boolean        @default(false)

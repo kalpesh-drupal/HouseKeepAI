@@ -9,7 +9,13 @@ export async function getDashboardStats(hotelId: string) {
 
   const rooms = await prisma.room.findMany({ where: { hotelId } });
   const totalRooms = rooms.length;
-  const occupied = rooms.filter((r) => r.status === RoomStatus.OCCUPIED).length;
+  const occupied = rooms.filter(
+    (r) =>
+      r.status === RoomStatus.OCCUPIED ||
+      r.guestStatus === "OCCUPIED" ||
+      r.guestStatus === "STAYOVER" ||
+      r.guestStatus === "ARRIVING"
+  ).length;
 
   const [
     arrivals,
@@ -39,7 +45,7 @@ export async function getDashboardStats(hotelId: string) {
       where: { room: { hotelId }, status: "PENDING" },
     }),
     prisma.room.count({ where: { hotelId, isRush: true } }),
-    prisma.room.count({ where: { hotelId, isVip: true, status: RoomStatus.OCCUPIED } }),
+    prisma.room.count({ where: { hotelId, isVip: true, OR: [{ status: RoomStatus.OCCUPIED }, { guestStatus: { in: ["OCCUPIED", "STAYOVER", "ARRIVING"] } }] } }),
     prisma.guestRequest.count({
       where: { hotelId, status: { not: "COMPLETED" } },
     }),
@@ -83,6 +89,7 @@ export async function getDashboardStats(hotelId: string) {
         { name: "Clean", value: vacantClean },
         { name: "Maintenance", value: maintenance },
         { name: "OOO", value: outOfOrder },
+        { name: "Out of inventory", value: rooms.filter((r) => r.status === RoomStatus.OUT_OF_INVENTORY).length },
       ],
       avgCleaningTime: 28,
       inspectionScore: 92,

@@ -1,4 +1,4 @@
-import { CleaningStatus, RoomStatus } from "@prisma/client";
+import { CleaningStatus, GuestStayStatus, RoomStatus } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { DEFAULT_CHECKLIST_ITEMS } from "@/lib/utils";
 import { resetRoomChecklist } from "@/lib/room-inventory";
@@ -8,6 +8,7 @@ export type HkListRow = {
   roomType?: string;
   floor?: number;
   status?: string;
+  guestStatus?: string;
   housekeeperEmail?: string;
   housekeeperName?: string;
   priority?: number;
@@ -67,9 +68,14 @@ const HEADER_MAP: Record<string, keyof HkListRow> = {
   hkstatus: "status",
   hskstatus: "status",
   housekeepingstatus: "status",
-  fostatus: "status",
-  frontofficestatus: "status",
-  frontofficestatuscode: "status",
+  fostatus: "guestStatus",
+  frontofficestatus: "guestStatus",
+  frontofficestatuscode: "guestStatus",
+  gueststatus: "guestStatus",
+  occupancy: "guestStatus",
+  occupancystatus: "guestStatus",
+  reservationstatus: "guestStatus",
+  staystatus: "guestStatus",
   hk: "status",
   hsk: "status",
   condition: "status",
@@ -101,95 +107,109 @@ const HEADER_MAP: Record<string, keyof HkListRow> = {
   etaminutes: "estimatedMinutes",
 };
 
+function statusParts(raw: string) {
+  return {
+    compact: raw.trim().toUpperCase().replace(/[^A-Z0-9]/g, ""),
+    spaced: raw.trim().toUpperCase().replace(/[\s/_-]+/g, " ").trim(),
+  };
+}
+
 /**
- * Map many real-world housekeeping / PMS status strings to RoomStatus.
- * Handles phrases like "Vacant Dirty", codes like DI/CL/VD/VC, due-out, etc.
+ * Housekeeping condition from a report cell: clean, dirty, out of order, out of inventory.
+ * Guest words in the same cell (stayover, occupied, departing) are ignored here.
  */
 export function parseStatus(raw?: string): RoomStatus | undefined {
-  if (!raw) return undefined;
-  const original = raw.trim();
-  if (!original) return undefined;
+  if (!raw?.trim()) return undefined;
+  const { compact, spaced } = statusParts(raw);
 
-  const compact = original.toUpperCase().replace(/[^A-Z0-9]/g, "");
-  const spaced = original.toUpperCase().replace(/[\s/-]+/g, " ").trim();
-
-  const exact: Record<string, RoomStatus> = {
-    DIRTY: RoomStatus.VACANT_DIRTY,
-    VACANTDIRTY: RoomStatus.VACANT_DIRTY,
-    VD: RoomStatus.VACANT_DIRTY,
-    D: RoomStatus.VACANT_DIRTY,
-    DI: RoomStatus.VACANT_DIRTY,
-    DU: RoomStatus.VACANT_DIRTY,
-    DRTY: RoomStatus.VACANT_DIRTY,
-    VDIRTY: RoomStatus.VACANT_DIRTY,
-    DIRTYVACANT: RoomStatus.VACANT_DIRTY,
-    VACANTD: RoomStatus.VACANT_DIRTY,
-    CHECKOUT: RoomStatus.VACANT_DIRTY,
-    CHECKEDOUT: RoomStatus.VACANT_DIRTY,
-    DEPARTURE: RoomStatus.VACANT_DIRTY,
-    DEPARTED: RoomStatus.VACANT_DIRTY,
-    DUEOUT: RoomStatus.VACANT_DIRTY,
-    DUEOUTDIRTY: RoomStatus.VACANT_DIRTY,
-    PICKUP: RoomStatus.VACANT_DIRTY,
-    TOUCHUP: RoomStatus.VACANT_DIRTY,
-    TURNOVER: RoomStatus.VACANT_DIRTY,
-    CLEAN: RoomStatus.VACANT_CLEAN,
-    VACANTCLEAN: RoomStatus.VACANT_CLEAN,
-    VC: RoomStatus.VACANT_CLEAN,
-    C: RoomStatus.VACANT_CLEAN,
-    CL: RoomStatus.VACANT_CLEAN,
-    CU: RoomStatus.VACANT_CLEAN,
-    VCLEAN: RoomStatus.VACANT_CLEAN,
-    CLEANVACANT: RoomStatus.VACANT_CLEAN,
-    READY: RoomStatus.VACANT_CLEAN,
-    READYCLEAN: RoomStatus.VACANT_CLEAN,
-    CLEANING: RoomStatus.CLEANING,
-    INPROGRESS: RoomStatus.CLEANING,
-    INPROC: RoomStatus.CLEANING,
-    IP: RoomStatus.CLEANING,
-    WORKING: RoomStatus.CLEANING,
-    STARTED: RoomStatus.CLEANING,
-    INSPECTED: RoomStatus.INSPECTED,
-    IS: RoomStatus.INSPECTED,
-    INSP: RoomStatus.INSPECTED,
-    PASSED: RoomStatus.INSPECTED,
-    OCCUPIED: RoomStatus.OCCUPIED,
-    OCC: RoomStatus.OCCUPIED,
-    OC: RoomStatus.OCCUPIED,
-    OO: RoomStatus.OCCUPIED,
-    STAYOVER: RoomStatus.OCCUPIED,
-    STAYOVERCLEAN: RoomStatus.OCCUPIED,
-    SO: RoomStatus.OCCUPIED,
-    SLEEPOVER: RoomStatus.OCCUPIED,
-    MAINTENANCE: RoomStatus.MAINTENANCE,
-    MT: RoomStatus.MAINTENANCE,
-    OOO: RoomStatus.OUT_OF_ORDER,
-    OUTOFORDER: RoomStatus.OUT_OF_ORDER,
-    BLOCKED: RoomStatus.OUT_OF_ORDER,
-  };
-
-  if (exact[compact]) return exact[compact];
-
-  // Phrase / contains matching (order matters)
-  if (/\bOUT\s*OF\s*ORDER\b|\bOOO\b|\bBLOCKED\b/.test(spaced)) return RoomStatus.OUT_OF_ORDER;
-  if (/\bMAINTENANCE\b|\bREPAIR\b/.test(spaced)) return RoomStatus.MAINTENANCE;
-  if (/\bCLEANING\b|\bIN\s*PROGRESS\b|\bBEING\s*CLEANED\b/.test(spaced)) return RoomStatus.CLEANING;
-  if (/\bINSPECT(ED|ION)?\b|\bPASSED\b/.test(spaced)) return RoomStatus.INSPECTED;
-  if (/\bSTAY\s*OVER\b|\bOCCUPIED\b|\bSLEEP\s*OVER\b/.test(spaced)) return RoomStatus.OCCUPIED;
-  if (/\bDIRTY\b|\bDUE\s*OUT\b|\bCHECK[\s-]*OUT\b|\bDEPARTURE\b|\bPICK\s*UP\b|\bTOUCH\s*UP\b/.test(spaced)) {
+  if (/\bOUT\s*OF\s*INVENTORY\b|\bOOI\b/.test(spaced) || compact === "OOI" || compact === "OUTOFINVENTORY" || compact === "OUTOFINV") {
+    return RoomStatus.OUT_OF_INVENTORY;
+  }
+  if (/\bOUT\s*OF\s*ORDER\b|\bOOO\b|\bBLOCKED\b/.test(spaced) || compact === "OOO" || compact === "OUTOFORDER" || compact === "BLOCKED") {
+    return RoomStatus.OUT_OF_ORDER;
+  }
+  if (compact === "MAINTENANCE" || compact === "MT" || compact === "REPAIR" || /\bMAINTENANCE\b|\bREPAIR\b/.test(spaced)) {
+    return RoomStatus.MAINTENANCE;
+  }
+  if (compact === "CLEANING" || compact === "INPROGRESS" || compact === "IP" || /\bCLEANING\b|\bIN\s*PROGRESS\b|\bBEING\s*CLEANED\b/.test(spaced)) {
+    return RoomStatus.CLEANING;
+  }
+  if (compact === "INSPECTED" || compact === "INSP" || compact === "PASSED" || /\bINSPECT(ED|ION)?\b|\bPASSED\b/.test(spaced)) {
+    return RoomStatus.INSPECTED;
+  }
+  if (
+    compact.includes("DIRTY") ||
+    ["D", "VD", "DI", "DU", "OD", "DRTY", "PICKUP", "TOUCHUP", "TURNOVER"].includes(compact) ||
+    /\bDIRTY\b|\bPICK\s*UP\b|\bTOUCH\s*UP\b/.test(spaced)
+  ) {
     return RoomStatus.VACANT_DIRTY;
   }
-  if (/\bCLEAN\b|\bREADY\b/.test(spaced)) return RoomStatus.VACANT_CLEAN;
+  if (
+    ["C", "VC", "CL", "CU", "OC", "CLEAN", "READY", "VACANTCLEAN", "READYCLEAN"].includes(compact) ||
+    /\bCLEAN\b|\bREADY\b/.test(spaced)
+  ) {
+    return RoomStatus.VACANT_CLEAN;
+  }
   if (/\bVACANT\b/.test(spaced) && /\bD\b/.test(spaced)) return RoomStatus.VACANT_DIRTY;
   if (/\bVACANT\b/.test(spaced) && /\bC\b/.test(spaced)) return RoomStatus.VACANT_CLEAN;
-
   return undefined;
+}
+
+/** Guest stay from a report cell: occupied, departing, stayover, arriving, maintenance, vacant. */
+export function parseGuestStay(raw?: string): GuestStayStatus | undefined {
+  if (!raw?.trim()) return undefined;
+  const { compact, spaced } = statusParts(raw);
+
+  if (compact === "STAYOVER" || compact === "SO" || compact === "SLEEPOVER" || compact.startsWith("STAYOVER") || /\bSTAY\s*OVER\b|\bSLEEP\s*OVER\b/.test(spaced)) {
+    return GuestStayStatus.STAYOVER;
+  }
+  if (
+    ["DEPARTING", "DEPARTURE", "DEPARTED", "DUEOUT", "CHECKOUT", "CHECKEDOUT", "DO"].includes(compact) ||
+    compact.startsWith("DUEOUT") ||
+    compact.startsWith("DEPART") ||
+    /\bDEPART|\bDUE\s*OUT\b|\bCHECK[\s-]*OUT\b/.test(spaced)
+  ) {
+    return GuestStayStatus.DEPARTING;
+  }
+  if (
+    ["ARRIVING", "ARRIVAL", "DUEIN", "CHECKIN", "CHECKEDIN", "ARR"].includes(compact) ||
+    compact.startsWith("ARRIV") ||
+    /\bARRIV|\bDUE\s*IN\b|\bCHECK[\s-]*IN\b/.test(spaced)
+  ) {
+    return GuestStayStatus.ARRIVING;
+  }
+  if (compact === "OD" || compact === "OC" || ["OCCUPIED", "OCC"].includes(compact) || compact.startsWith("OCCUPIED") || /\bOCCUPIED\b|\bOCC\b/.test(spaced)) {
+    return GuestStayStatus.OCCUPIED;
+  }
+  if (compact === "MAINTENANCE" || compact === "MAINT" || /\bMAINTENANCE\b|\bMAINT\b/.test(spaced)) {
+    return GuestStayStatus.MAINTENANCE;
+  }
+  if (compact === "VACANT" || compact === "EMPTY" || /\bVACANT\b/.test(spaced)) {
+    return GuestStayStatus.VACANT;
+  }
+  return undefined;
+}
+
+export function isReportStatus(raw?: string) {
+  return Boolean(parseStatus(raw) || parseGuestStay(raw));
+}
+
+function statusesFromRow(row: HkListRow) {
+  const fromStatus = {
+    hk: parseStatus(row.status),
+    guest: parseGuestStay(row.status),
+  };
+  const fromGuestColumn = parseGuestStay(row.guestStatus);
+  return {
+    hk: fromStatus.hk,
+    guest: fromGuestColumn ?? fromStatus.guest,
+  };
 }
 
 function looksLikeRoomType(value: string) {
   const v = value.trim().toLowerCase();
   if (!v) return false;
-  if (parseStatus(v)) return false;
+  if (isReportStatus(v)) return false;
   return /suite|standard|deluxe|king|queen|twin|double|single|studio|accessible|ada|connecting|family|executive|premium|villa|cottage|room/.test(
     v
   );
@@ -198,14 +218,14 @@ function looksLikeRoomType(value: string) {
 function resolveAmbiguousTypeOrStatus(value: string): { status?: string; roomType?: string } {
   const v = value.trim();
   if (!v) return {};
-  if (parseStatus(v)) return { status: v };
+  if (isReportStatus(v)) return { status: v };
   if (looksLikeRoomType(v)) return { roomType: v };
   // Unknown short codes often are status (DI, CL) already handled by parseStatus
   return { roomType: v };
 }
 
 function cleaningForStatus(status: RoomStatus): CleaningStatus | undefined {
-  if (status === RoomStatus.VACANT_DIRTY || status === RoomStatus.OUT_OF_ORDER) {
+  if (status === RoomStatus.VACANT_DIRTY || status === RoomStatus.OUT_OF_ORDER || status === RoomStatus.OUT_OF_INVENTORY) {
     return CleaningStatus.NOT_STARTED;
   }
   if (status === RoomStatus.VACANT_CLEAN || status === RoomStatus.INSPECTED) {
@@ -292,7 +312,7 @@ function isJunkReportLine(line: string) {
 function looksLikePersonName(value: string) {
   const v = value.trim();
   if (!v || v.length > 40) return false;
-  if (parseStatus(v) || looksLikeRoomType(v) || looksLikeRoomNumber(v)) return false;
+  if (isReportStatus(v) || looksLikeRoomType(v) || looksLikeRoomNumber(v)) return false;
   // Two+ words starting with capital, or single capitalized name
   return /^[A-Za-z][A-Za-z'.-]+(?:\s+[A-Za-z][A-Za-z'.-]+){0,3}$/.test(v);
 }
@@ -335,11 +355,11 @@ export function stackedRoomsToCsv(raw: string): string | null {
       const roomNo = extractRoomNumberFromLine(line);
       if (roomNo && line.trim().length > roomNo.length) {
         const rest = line.trim().slice(line.trim().indexOf(roomNo) + roomNo.length).trim();
-        if (parseStatus(rest) && !looksLikeRoomType(rest)) {
+        if (isReportStatus(rest) && !looksLikeRoomType(rest)) {
           rows.push([roomNo, "", csvEscape(rest), ""].join(","));
         } else {
           // May be "King Dirty" or just type
-          const statusMatch = rest.match(/\b(dirty|clean|vacant\s*dirty|vacant\s*clean|vd|vc|di|cl|ooo|occupied|cleaning|inspected)\b/i);
+          const statusMatch = rest.match(/\b(dirty|clean|vacant\s*dirty|vacant\s*clean|out\s*of\s*order|out\s*of\s*inventory|vd|vc|di|cl|ooo|ooi|occupied|stay\s*over|stayover|departing|departure|due\s*out|arriving|arrival|cleaning|inspected|maintenance)\b/i);
           if (statusMatch) {
             const status = statusMatch[0];
             const type = rest.replace(statusMatch[0], "").replace(/[|/,-]+/g, " ").trim();
@@ -365,18 +385,18 @@ export function stackedRoomsToCsv(raw: string): string | null {
       // "105 Dirty" / "106 King" starts a new room on the same line — stop
       if (isInlineRoomLine(next)) break;
 
-      if (parseStatus(next) && !looksLikeRoomType(next)) {
+      if (isReportStatus(next) && !looksLikeRoomType(next)) {
         if (!status) status = next;
       } else if (looksLikePersonName(next) && roomType) {
         if (!housekeeper) housekeeper = next;
       } else if (!roomType) {
         roomType = next;
-      } else if (!status && parseStatus(next)) {
+      } else if (!status && isReportStatus(next)) {
         status = next;
       } else if (!housekeeper && looksLikePersonName(next)) {
         housekeeper = next;
       } else if (!status) {
-        const maybe = parseStatus(next);
+        const maybe = isReportStatus(next);
         if (maybe) status = next;
         else roomType = `${roomType} ${next}`.trim();
       }
@@ -468,8 +488,17 @@ export function parseHkListCsv(text: string): HkListRow[] {
   let mapped: Array<keyof HkListRow | "ambiguousType" | undefined> = headers.map((h) => {
     if (HEADER_MAP[h]) return HEADER_MAP[h];
     if (h === "type") return "ambiguousType";
-    // Any header containing status/condition → status column
-    if (h.includes("status") || h.includes("condition") || h.endsWith("code") && (h.includes("hk") || h.includes("fo") || h.includes("rm"))) {
+    const guestColumn =
+      h.includes("gueststatus") ||
+      h.includes("occupan") ||
+      h.includes("reservation") ||
+      h.includes("frontoffice") ||
+      h.includes("staystatus") ||
+      h === "fostatus" ||
+      h === "fo";
+    if (guestColumn) return "guestStatus";
+    // Any remaining header containing status/condition → housekeeping status
+    if (h.includes("status") || h.includes("condition") || (h.endsWith("code") && (h.includes("hk") || h.includes("rm")))) {
       return "status";
     }
     if (h.includes("type") || h.includes("category")) return "roomType";
@@ -496,9 +525,9 @@ export function parseHkListCsv(text: string): HkListRow[] {
           const parts = line.split(/\s+/).filter(Boolean);
           if (!looksLikeRoomNumber(parts[0] || "")) continue;
           const rest = parts.slice(1).join(" ");
-          if (parseStatus(rest) && !looksLikeRoomType(rest)) {
+          if (isReportStatus(rest) && !looksLikeRoomType(rest)) {
             rows.push({ roomNumber: parts[0], status: rest });
-          } else if (parseStatus(parts[1] || "") && !looksLikeRoomType(parts[1] || "")) {
+          } else if (isReportStatus(parts[1] || "") && !looksLikeRoomType(parts[1] || "")) {
             rows.push({
               roomNumber: parts[0],
               status: parts[1],
@@ -566,9 +595,9 @@ export function parseHkListCsv(text: string): HkListRow[] {
     }
 
     // If status still missing, scan every cell for a recognizable status value
-    if (!row.status || !parseStatus(row.status)) {
+    if (!row.status || !isReportStatus(row.status)) {
       for (const cell of [...cols, ...extras]) {
-        if (parseStatus(cell)) {
+        if (isReportStatus(cell) && cell.trim() !== row.guestStatus) {
           row.status = cell.trim();
           break;
         }
@@ -684,8 +713,9 @@ export async function applyHkListRows(
       const roomType = normalizeRoomType(row.roomType);
       maxFloor = Math.max(maxFloor, floor);
 
-      const status = parseStatus(row.status);
-      if (status) statusApplied += 1;
+      const parsed = statusesFromRow(row);
+      const status = parsed.hk;
+      if (status || parsed.guest) statusApplied += 1;
       else statusMissing += 1;
 
       const existing = await prisma.room.findFirst({
@@ -702,6 +732,7 @@ export async function applyHkListRows(
               floor,
               type: roomType,
               status: initialStatus,
+              ...(parsed.guest ? { guestStatus: parsed.guest } : {}),
               cleaningStatus: cleaningForStatus(initialStatus) ?? CleaningStatus.COMPLETED,
               manualLock: true,
               checklistItems: {
@@ -731,6 +762,7 @@ export async function applyHkListRows(
             ...(status
               ? { status, cleaningStatus: cleaningForStatus(status) ?? CleaningStatus.NOT_STARTED }
               : {}),
+            ...(parsed.guest ? { guestStatus: parsed.guest } : {}),
             manualLock: true,
           },
         });
@@ -781,14 +813,16 @@ export async function applyHkListRows(
     });
 
     const roomType = normalizeRoomType(row.roomType);
-    const status = parseStatus(row.status);
-    if (!status && row.status?.trim()) {
-      if (unmappedStatusSamples.length < 8 && !unmappedStatusSamples.includes(row.status.trim())) {
-        unmappedStatusSamples.push(row.status.trim());
+    const parsed = statusesFromRow(row);
+    const status = parsed.hk;
+    const rawStatus = [row.status, row.guestStatus].filter(Boolean).join(" / ");
+    if (!status && !parsed.guest && rawStatus.trim()) {
+      if (unmappedStatusSamples.length < 8 && !unmappedStatusSamples.includes(rawStatus.trim())) {
+        unmappedStatusSamples.push(rawStatus.trim());
       }
-      warnings.push(`Room ${roomNumber}: unrecognized status "${row.status}"`);
+      warnings.push(`Room ${roomNumber}: unrecognized status "${rawStatus}"`);
       statusMissing += 1;
-    } else if (!status) {
+    } else if (!status && !parsed.guest) {
       statusMissing += 1;
     }
 
@@ -799,7 +833,7 @@ export async function applyHkListRows(
     }
 
     const cleaningStatus = status ? cleaningForStatus(status) : undefined;
-    if (status) statusApplied += 1;
+    if (status || parsed.guest) statusApplied += 1;
 
     const hasHkColumn = row.housekeeperEmail !== undefined || row.housekeeperName !== undefined;
     let housekeeperId: string | null | undefined = undefined;
@@ -829,6 +863,7 @@ export async function applyHkListRows(
       where: { id: room.id },
       data: {
         ...(status ? { status, cleaningStatus: cleaningStatus ?? CleaningStatus.NOT_STARTED } : {}),
+        ...(parsed.guest ? { guestStatus: parsed.guest } : {}),
         ...(row.roomType ? { type: roomType } : {}),
         ...(housekeeperId !== undefined ? { housekeeperId } : {}),
         ...(row.priority != null ? { priority: Number(row.priority) } : {}),

@@ -2,7 +2,7 @@ import { requireAuth } from "@/lib/session";
 import { getRoomById } from "@/lib/queries";
 import { prisma } from "@/lib/prisma";
 import { notFound } from "next/navigation";
-import { ROOM_STATUS_CONFIG } from "@/lib/utils";
+import { GUEST_STAY_CONFIG, ROOM_STATUS_CONFIG } from "@/lib/utils";
 import { MobilePhotoUpload } from "@/components/mobile-photo-upload";
 import { MobileRoomWork } from "@/components/mobile-room-work";
 import { RoomNotesEditor } from "@/components/room-notes-editor";
@@ -53,7 +53,7 @@ export default async function MobileRoomPage({
         <span className={`rounded-full px-2 py-1 text-xs ${cfg.bg}`}>{cfg.label}</span>
       </div>
       <p className="text-sm text-muted-foreground">
-        Guest: {room.guestName || "—"} · HK: {room.housekeeper?.name || "Unassigned"} · Est. {room.estimatedMinutes} min
+        Guest: {room.guestName || "—"} · {GUEST_STAY_CONFIG[room.guestStatus].label} · HK: {room.housekeeper?.name || "Unassigned"} · Est. {room.estimatedMinutes} min
       </p>
 
       <MobileRoomWork

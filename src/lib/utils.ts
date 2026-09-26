@@ -18,6 +18,16 @@ export const ROOM_STATUS_CONFIG = {
   OCCUPIED: { label: "Occupied", color: "bg-slate-400", text: "text-slate-700", bg: "bg-slate-50", emoji: "⚪" },
   MAINTENANCE: { label: "Maintenance", color: "bg-purple-500", text: "text-purple-700", bg: "bg-purple-50", emoji: "🟪" },
   OUT_OF_ORDER: { label: "Out of Order", color: "bg-gray-800", text: "text-gray-700", bg: "bg-gray-100", emoji: "⚫" },
+  OUT_OF_INVENTORY: { label: "Out of Inventory", color: "bg-stone-700", text: "text-stone-800", bg: "bg-stone-100", emoji: "🚫" },
+} as const;
+
+export const GUEST_STAY_CONFIG = {
+  VACANT: { label: "Vacant", className: "bg-slate-100 text-slate-700" },
+  OCCUPIED: { label: "Occupied", className: "bg-slate-200 text-slate-800" },
+  DEPARTING: { label: "Departing", className: "bg-orange-100 text-orange-800" },
+  STAYOVER: { label: "Stayover", className: "bg-indigo-100 text-indigo-800" },
+  ARRIVING: { label: "Arriving", className: "bg-sky-100 text-sky-800" },
+  MAINTENANCE: { label: "Maintenance", className: "bg-purple-100 text-purple-800" },
 } as const;
 
 export const DEFAULT_CHECKLIST_ITEMS = [
@@ -48,6 +58,7 @@ export const NAV_ITEMS = [
   { href: "/m", label: "Mobile App", icon: "Smartphone", roles: "all" as const },
   { href: "/messages", label: "Messages", icon: "MessageSquare", roles: "all" as const },
   { href: "/account", label: "Account", icon: "KeyRound", roles: "all" as const },
+  { href: "/staff", label: "Add Staff", icon: "UserPlus", roles: [UserRole.OWNER, UserRole.GENERAL_MANAGER] },
   { href: "/settings", label: "Settings", icon: "Settings", roles: [UserRole.OWNER, UserRole.GENERAL_MANAGER] },
 ];
 

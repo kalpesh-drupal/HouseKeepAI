@@ -148,7 +148,8 @@ export function HkUploadForm({
             Update room status (daily)
           </div>
           <p className="text-xs text-muted-foreground">
-            Daily use: set Dirty/Clean and assign housekeepers for rooms that already exist.{" "}
+            Daily use: set housekeeping status (clean, dirty, out of order, out of inventory) and guest status
+            (occupied, departing, stayover, arriving). Assign housekeepers for rooms that already exist.{" "}
             <strong>Never creates new rooms.</strong>
           </p>
         </button>
@@ -228,6 +229,11 @@ export function HkUploadForm({
               <p className="text-muted-foreground">
                 Required: <code className="rounded bg-muted px-1">Room</code>,{" "}
                 <code className="rounded bg-muted px-1">Status</code>
+              </p>
+              <p className="mt-2 text-muted-foreground">
+                Status accepts clean, dirty, out of order, and out of inventory. A separate{" "}
+                <code className="rounded bg-muted px-1">Guest Status</code> column (or the same cell) can be occupied,
+                departing, stayover, arriving, or maintenance. Example: <code className="rounded bg-muted px-1">Stayover Dirty</code>.
               </p>
               <p className="mt-2 text-muted-foreground">
                 Optional: Housekeeper, Rush, VIP, Notes

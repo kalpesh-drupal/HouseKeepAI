@@ -24,6 +24,7 @@ import {
   Plug,
   Smartphone,
   KeyRound,
+  UserPlus,
 } from "lucide-react";
 import { NAV_ITEMS, ROLE_LABELS, canAccessNav, cn } from "@/lib/utils";
 import { UserRole } from "@prisma/client";
@@ -50,6 +51,7 @@ const iconMap = {
   Plug,
   Smartphone,
   KeyRound,
+  UserPlus,
 };
 
 const NAV_I18N: Record<string, TranslationKey> = {
@@ -69,6 +71,8 @@ const NAV_I18N: Record<string, TranslationKey> = {
   "/pms": "pms",
   "/m": "mobileApp",
   "/messages": "messages",
+  "/account": "account",
+  "/staff": "addStaff",
   "/settings": "settings",
 };
 
