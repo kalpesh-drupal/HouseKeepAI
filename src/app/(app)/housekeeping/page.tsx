@@ -4,7 +4,7 @@ import { prisma } from "@/lib/prisma";
 import Link from "next/link";
 import { ChecklistToggle } from "@/components/checklist-toggle";
 import { Crown, Zap, Clock } from "lucide-react";
-import { canAssignHousekeepers, GUEST_STAY_CONFIG, ROOM_STATUS_CONFIG } from "@/lib/utils";
+import { canAssignHousekeepers, guestStayLabel, ROOM_STATUS_CONFIG } from "@/lib/utils";
 import { RoomAssignmentBoard } from "@/components/room-assignment-board";
 import { MobileRoomActions } from "@/components/mobile-room-actions";
 import { CleaningTimer } from "@/components/cleaning-timer";
@@ -75,8 +75,8 @@ export default async function HousekeepingPage() {
                       <span className={`rounded-full px-2 py-1 text-xs font-medium ${config.bg} ${config.text}`}>
                         HK: {config.label}
                       </span>
-                      <span className={`rounded-full px-2 py-1 text-xs font-medium ${GUEST_STAY_CONFIG[room.guestStatus].className}`}>
-                        Guest: {GUEST_STAY_CONFIG[room.guestStatus].label}
+                      <span className={`rounded-full px-2 py-1 text-xs font-medium ${guestStayLabel(room.guestStatus, room.status).className}`}>
+                        {guestStayLabel(room.guestStatus, room.status).label}
                       </span>
                       {room.isVip && <Crown className="h-5 w-5 text-amber-500" />}
                       {room.isRush && <Zap className="h-5 w-5 text-red-500" />}

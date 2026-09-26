@@ -149,7 +149,7 @@ export function HkUploadForm({
           </div>
           <p className="text-xs text-muted-foreground">
             Daily use: set housekeeping status (clean, dirty, out of order, out of inventory) and guest status
-            (occupied, departing, stayover, arriving). Assign housekeepers for rooms that already exist.{" "}
+            (occupied, stayover, departing, checked out, arriving). Assign housekeepers for rooms that already exist.{" "}
             <strong>Never creates new rooms.</strong>
           </p>
         </button>
@@ -233,7 +233,7 @@ export function HkUploadForm({
               <p className="mt-2 text-muted-foreground">
                 Status accepts clean, dirty, out of order, and out of inventory. A separate{" "}
                 <code className="rounded bg-muted px-1">Guest Status</code> column (or the same cell) can be occupied,
-                departing, stayover, arriving, or maintenance. Example: <code className="rounded bg-muted px-1">Stayover Dirty</code>.
+                departing, stayover, checked out, or arriving. Example: <code className="rounded bg-muted px-1">Stayover Dirty</code>.
               </p>
               <p className="mt-2 text-muted-foreground">
                 Optional: Housekeeper, Rush, VIP, Notes

@@ -155,7 +155,7 @@ export function parseStatus(raw?: string): RoomStatus | undefined {
   return undefined;
 }
 
-/** Guest stay from a report cell: occupied, departing, stayover, arriving, maintenance, vacant. */
+/** Guest stay from a report cell: stayover, departing, checked out, arriving, occupied. */
 export function parseGuestStay(raw?: string): GuestStayStatus | undefined {
   if (!raw?.trim()) return undefined;
   const { compact, spaced } = statusParts(raw);
@@ -164,10 +164,16 @@ export function parseGuestStay(raw?: string): GuestStayStatus | undefined {
     return GuestStayStatus.STAYOVER;
   }
   if (
-    ["DEPARTING", "DEPARTURE", "DEPARTED", "DUEOUT", "CHECKOUT", "CHECKEDOUT", "DO"].includes(compact) ||
+    ["CHECKEDOUT", "CHECKOUT", "CO", "DEPARTED"].includes(compact) ||
+    /\bCHECKED\s*OUT\b|\bCHECK[\s-]*OUT\b/.test(spaced)
+  ) {
+    return GuestStayStatus.CHECKED_OUT;
+  }
+  if (
+    ["DEPARTING", "DEPARTURE", "DUEOUT", "DO"].includes(compact) ||
     compact.startsWith("DUEOUT") ||
     compact.startsWith("DEPART") ||
-    /\bDEPART|\bDUE\s*OUT\b|\bCHECK[\s-]*OUT\b/.test(spaced)
+    /\bDEPARTING\b|\bDEPARTURE\b|\bDUE\s*OUT\b/.test(spaced)
   ) {
     return GuestStayStatus.DEPARTING;
   }
@@ -359,7 +365,7 @@ export function stackedRoomsToCsv(raw: string): string | null {
           rows.push([roomNo, "", csvEscape(rest), ""].join(","));
         } else {
           // May be "King Dirty" or just type
-          const statusMatch = rest.match(/\b(dirty|clean|vacant\s*dirty|vacant\s*clean|out\s*of\s*order|out\s*of\s*inventory|vd|vc|di|cl|ooo|ooi|occupied|stay\s*over|stayover|departing|departure|due\s*out|arriving|arrival|cleaning|inspected|maintenance)\b/i);
+          const statusMatch = rest.match(/\b(dirty|clean|vacant\s*dirty|vacant\s*clean|out\s*of\s*order|out\s*of\s*inventory|vd|vc|di|cl|ooo|ooi|occupied|stay\s*over|stayover|departing|departure|due\s*out|checked\s*out|checkout|arriving|arrival|cleaning|inspected|maintenance)\b/i);
           if (statusMatch) {
             const status = statusMatch[0];
             const type = rest.replace(statusMatch[0], "").replace(/[|/,-]+/g, " ").trim();

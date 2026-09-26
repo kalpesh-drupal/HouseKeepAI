@@ -34,6 +34,7 @@ enum GuestStayStatus {
   DEPARTING
   STAYOVER
   ARRIVING
+  CHECKED_OUT
   MAINTENANCE
 }
 

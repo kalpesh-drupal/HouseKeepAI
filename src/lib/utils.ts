@@ -23,12 +23,26 @@ export const ROOM_STATUS_CONFIG = {
 
 export const GUEST_STAY_CONFIG = {
   VACANT: { label: "Vacant", className: "bg-slate-100 text-slate-700" },
-  OCCUPIED: { label: "Occupied", className: "bg-slate-200 text-slate-800" },
+  OCCUPIED: { label: "Stayover", className: "bg-indigo-100 text-indigo-800" },
   DEPARTING: { label: "Departing", className: "bg-orange-100 text-orange-800" },
   STAYOVER: { label: "Stayover", className: "bg-indigo-100 text-indigo-800" },
   ARRIVING: { label: "Arriving", className: "bg-sky-100 text-sky-800" },
+  CHECKED_OUT: { label: "Checked out", className: "bg-rose-100 text-rose-800" },
   MAINTENANCE: { label: "Maintenance", className: "bg-purple-100 text-purple-800" },
 } as const;
+
+/** What housekeeping should read: stayover, departing, or checked out. */
+export function guestStayLabel(guestStatus: keyof typeof GUEST_STAY_CONFIG, roomStatus?: string) {
+  if (guestStatus === "DEPARTING") return GUEST_STAY_CONFIG.DEPARTING;
+  if (guestStatus === "ARRIVING") return GUEST_STAY_CONFIG.ARRIVING;
+  if (guestStatus === "MAINTENANCE") return GUEST_STAY_CONFIG.MAINTENANCE;
+  if (guestStatus === "CHECKED_OUT") return GUEST_STAY_CONFIG.CHECKED_OUT;
+  if (guestStatus === "STAYOVER" || guestStatus === "OCCUPIED" || roomStatus === "OCCUPIED") {
+    return GUEST_STAY_CONFIG.STAYOVER;
+  }
+  if (roomStatus === "VACANT_DIRTY" || roomStatus === "CLEANING") return GUEST_STAY_CONFIG.CHECKED_OUT;
+  return GUEST_STAY_CONFIG.VACANT;
+}
 
 export const DEFAULT_CHECKLIST_ITEMS = [
   "Bathroom", "Bed", "Vacuum", "Dust", "Coffee", "Amenities",

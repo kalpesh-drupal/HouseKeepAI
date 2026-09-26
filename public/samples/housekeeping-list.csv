@@ -3,6 +3,6 @@ Room,Room Type,Floor,Status,Guest Status,Housekeeper,Priority,Rush,VIP,Guest,Not
 108,Suite,1,Dirty,Arriving,Maria Housekeeper,10,yes,yes,,VIP arriving 2pm,25
 201,Standard,2,Cleaning,Stayover,Maria Housekeeper,4,no,no,,,40
 220,Deluxe,2,Dirty,Occupied,Maria Housekeeper,5,no,no,,,35
-223,Standard,2,Out of Order,Vacant,Maria Housekeeper,7,yes,no,,Rush turn,35
+223,Standard,2,Dirty,Checked out,Maria Housekeeper,7,yes,no,,Rush turn,35
 301,Standard,3,Out of Inventory,Maintenance,,3,no,no,,Unassigned — leave blank to clear HK,30
 105,King,1,Clean,Stayover,Maria Housekeeper,1,no,no,,Stayover done,20

@@ -2,7 +2,7 @@ import { requireAuth } from "@/lib/session";
 import { getFrontDeskData } from "@/lib/queries";
 import { prisma } from "@/lib/prisma";
 import Link from "next/link";
-import { ROOM_STATUS_CONFIG } from "@/lib/utils";
+import { guestStayLabel, ROOM_STATUS_CONFIG } from "@/lib/utils";
 import { FrontDeskActions } from "@/components/front-desk-actions";
 
 export default async function FrontDeskPage() {
@@ -51,6 +51,9 @@ export default async function FrontDeskPage() {
                       </Link>
                       <span className="text-xs">{ROOM_STATUS_CONFIG[room.status].label}</span>
                     </div>
+                    <p className={`mt-1 inline-block rounded-full px-2 py-0.5 text-xs font-medium ${guestStayLabel(room.guestStatus, room.status).className}`}>
+                      {guestStayLabel(room.guestStatus, room.status).label}
+                    </p>
                     <FrontDeskActions
                       room={{ id: room.id, number: room.number, isVip: room.isVip, isRush: room.isRush }}
                       allRooms={allRooms}
