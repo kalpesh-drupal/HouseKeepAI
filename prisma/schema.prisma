@@ -158,6 +158,18 @@ model User {
   foundItems         LostFoundItem[]     @relation("FoundBy")
   assignedRequests   GuestRequest[]      @relation("AssignedRequests")
   pushSubscriptions  PushSubscription[]
+  passwordResetRequests PasswordResetRequest[]
+}
+
+model PasswordResetRequest {
+  id         String   @id @default(cuid())
+  userId     String
+  hotelId    String
+  createdAt  DateTime @default(now())
+  resolvedAt DateTime?
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([hotelId, resolvedAt])
 }
 
 model Room {

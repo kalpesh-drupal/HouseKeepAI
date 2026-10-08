@@ -5,11 +5,18 @@ import { UsersAdminPanel } from "@/components/users-admin-panel";
 
 export default async function StaffPage() {
   const session = await requireAuth([UserRole.OWNER, UserRole.GENERAL_MANAGER]);
-  const users = await prisma.user.findMany({
-    where: { hotelId: session.user.hotelId },
-    select: { id: true, name: true, email: true, role: true, active: true },
-    orderBy: { name: "asc" },
-  });
+  const [users, resetRequests] = await Promise.all([
+    prisma.user.findMany({
+      where: { hotelId: session.user.hotelId },
+      select: { id: true, name: true, email: true, role: true, active: true },
+      orderBy: { name: "asc" },
+    }),
+    prisma.passwordResetRequest.findMany({
+      where: { hotelId: session.user.hotelId, resolvedAt: null },
+      include: { user: { select: { id: true, name: true, email: true, role: true, active: true } } },
+      orderBy: { createdAt: "asc" },
+    }),
+  ]);
 
   return (
     <div className="space-y-6">
@@ -19,7 +26,7 @@ export default async function StaffPage() {
           Create a login for a housekeeper or other employee, then tell them the email and temporary password.
         </p>
       </div>
-      <UsersAdminPanel users={users} />
+      <UsersAdminPanel users={users} resetRequests={resetRequests.map((request) => request.user)} />
     </div>
   );
 }

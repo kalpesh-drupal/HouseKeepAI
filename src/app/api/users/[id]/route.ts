@@ -38,6 +38,10 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       return NextResponse.json({ error: "Password must be at least 8 characters" }, { status: 400 });
     }
     data.passwordHash = await bcrypt.hash(password, 10);
+    await prisma.passwordResetRequest.updateMany({
+      where: { userId: id, resolvedAt: null },
+      data: { resolvedAt: new Date() },
+    });
   }
 
   const updated = await prisma.user.update({

@@ -13,7 +13,13 @@ type StaffUser = {
   active: boolean;
 };
 
-export function UsersAdminPanel({ users: initial }: { users: StaffUser[] }) {
+export function UsersAdminPanel({
+  users: initial,
+  resetRequests = [],
+}: {
+  users: StaffUser[];
+  resetRequests?: StaffUser[];
+}) {
   const router = useRouter();
   const [users, setUsers] = useState(initial);
   const [form, setForm] = useState({ name: "", email: "", role: "HOUSEKEEPER" as UserRole, password: "password123" });
@@ -54,7 +60,8 @@ export function UsersAdminPanel({ users: initial }: { users: StaffUser[] }) {
       body: JSON.stringify({ password }),
     });
     const data = await res.json();
-    setMessage(data.success ? `Password updated for ${user.email}` : data.error || "Could not reset password");
+    setMessage(data.success ? `Password updated for ${user.email}. Tell them the new password.` : data.error || "Could not reset password");
+    if (data.success) router.refresh();
   }
 
   async function updateUser(id: string, patch: Record<string, unknown>) {
@@ -72,6 +79,27 @@ export function UsersAdminPanel({ users: initial }: { users: StaffUser[] }) {
 
   return (
     <div className="space-y-6">
+      {resetRequests.length > 0 && (
+        <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-950">
+          <p className="font-semibold">Password reset requests</p>
+          <ul className="mt-2 space-y-2">
+            {resetRequests.map((user) => (
+              <li key={user.id} className="flex flex-wrap items-center justify-between gap-2">
+                <span>
+                  {user.name} · {user.email}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => resetPassword(user)}
+                  className="rounded-lg bg-primary px-3 py-1 text-xs font-medium text-white"
+                >
+                  Set new password
+                </button>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
       <form onSubmit={createUser} className="grid gap-3 rounded-2xl border border-border bg-card p-6 md:grid-cols-2">
         <h2 className="md:col-span-2 font-semibold">Add staff user</h2>
         <input

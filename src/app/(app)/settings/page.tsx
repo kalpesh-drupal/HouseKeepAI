@@ -8,7 +8,7 @@ import { ChangePasswordForm } from "@/components/change-password-form";
 
 export default async function SettingsPage() {
   const session = await requireAuth([UserRole.OWNER, UserRole.GENERAL_MANAGER]);
-  const [users, rooms, connections] = await Promise.all([
+  const [users, rooms, connections, resetRequests] = await Promise.all([
     prisma.user.findMany({
       where: { hotelId: session.user.hotelId },
       select: { id: true, name: true, email: true, role: true, active: true },
@@ -16,6 +16,11 @@ export default async function SettingsPage() {
     }),
     prisma.room.count({ where: { hotelId: session.user.hotelId } }),
     prisma.pmsConnection.findMany({ where: { hotelId: session.user.hotelId } }),
+    prisma.passwordResetRequest.findMany({
+      where: { hotelId: session.user.hotelId, resolvedAt: null },
+      include: { user: { select: { id: true, name: true, email: true, role: true, active: true } } },
+      orderBy: { createdAt: "asc" },
+    }),
   ]);
 
   return (
@@ -50,7 +55,7 @@ export default async function SettingsPage() {
         <p className="text-sm text-muted-foreground">
           Create staff logins and reset employee passwords. Tell them to sign in at the login page with the new password.
         </p>
-        <UsersAdminPanel users={users} />
+        <UsersAdminPanel users={users} resetRequests={resetRequests.map((request) => request.user)} />
       </section>
 
       <section className="rounded-2xl border border-border bg-card p-6 space-y-3">

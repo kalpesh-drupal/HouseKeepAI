@@ -115,6 +115,11 @@ function LoginForm() {
                 required
               />
             </div>
+            <div className="text-right">
+              <a href="/forgot-password" className="text-sm text-primary hover:underline">
+                Forgot password?
+              </a>
+            </div>
             {error && <p className="text-sm text-red-600">{error}</p>}
             <button
               type="submit"
