@@ -4,6 +4,7 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { signIn } from "next-auth/react";
 import { Hotel, Loader2 } from "lucide-react";
+import { REPORT_PMS_LIST } from "@/lib/pms/report-catalog";
 
 const DEFAULT_ROOMS = 8;
 
@@ -20,6 +21,7 @@ export function OnboardingForm() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [hotelName, setHotelName] = useState("");
+  const [reportPms, setReportPms] = useState("");
   const [floors, setFloors] = useState(3);
   const [defaultRooms, setDefaultRooms] = useState(DEFAULT_ROOMS);
   const [roomsByFloor, setRoomsByFloor] = useState<number[]>([8, 8, 8]);
@@ -60,6 +62,7 @@ export function OnboardingForm() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         hotelName,
+        reportPms,
         floors: importRoomsLater ? Math.max(floors, 1) : floors,
         roomsByFloor: importRoomsLater ? [] : roomsByFloor,
         roomsPerFloor: defaultRooms,
@@ -115,6 +118,26 @@ export function OnboardingForm() {
         onChange={(e) => setHotelName(e.target.value)}
         className="w-full rounded-xl border border-border px-4 py-3 text-sm"
       />
+
+      <div>
+        <label className="mb-1 block text-xs text-muted-foreground">PMS for housekeeping reports</label>
+        <select
+          required
+          value={reportPms}
+          onChange={(e) => setReportPms(e.target.value)}
+          className="w-full rounded-xl border border-border bg-card px-4 py-3 text-sm"
+        >
+          <option value="">Choose your PMS</option>
+          {REPORT_PMS_LIST.map((pms) => (
+            <option key={pms.id} value={pms.id}>
+              {pms.label}
+            </option>
+          ))}
+        </select>
+        <p className="mt-1 text-xs text-muted-foreground">
+          Room status updates use this PMS’s column names and status words. More systems can be added later.
+        </p>
+      </div>
 
       <div className="grid grid-cols-2 gap-3">
         <div>

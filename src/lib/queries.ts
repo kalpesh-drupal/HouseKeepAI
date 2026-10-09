@@ -11,10 +11,10 @@ export async function getDashboardStats(hotelId: string) {
   const totalRooms = rooms.length;
   const occupied = rooms.filter(
     (r) =>
-      r.status === RoomStatus.OCCUPIED ||
       r.guestStatus === "OCCUPIED" ||
       r.guestStatus === "STAYOVER" ||
-      r.guestStatus === "ARRIVING"
+      r.guestStatus === "DEPARTING" ||
+      r.status === RoomStatus.OCCUPIED
   ).length;
 
   const [

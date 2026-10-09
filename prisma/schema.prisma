@@ -122,6 +122,8 @@ model Hotel {
   id        String   @id @default(cuid())
   name      String
   floors    Int      @default(3)
+  /// PMS whose housekeeping report this hotel uploads (SkyTouch, Choice Advantage, …).
+  reportPms String?
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 

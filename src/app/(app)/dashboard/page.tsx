@@ -115,8 +115,8 @@ export default async function DashboardPage() {
         <StatCard title="Today's Occupancy" value={`${stats.occupancy}%`} subtitle={`${stats.occupied} of ${stats.totalRooms} rooms`} icon={Users} variant="info" />
         <StatCard title="Today's Arrivals" value={stats.arrivals} icon={LogIn} href="/map?filter=arrival" />
         <StatCard title="Today's Departures" value={stats.departures} icon={LogOut} href="/map?filter=departure" />
-        <StatCard title="Vacant Dirty" value={stats.vacantDirty} icon={Sparkles} variant="danger" href="/map?filter=dirty" />
-        <StatCard title="Vacant Clean" value={stats.vacantClean} icon={CheckCircle} variant="success" href="/map?filter=clean" />
+        <StatCard title="Dirty" value={stats.vacantDirty} icon={Sparkles} variant="danger" href="/map?filter=dirty" />
+        <StatCard title="Clean" value={stats.vacantClean} icon={CheckCircle} variant="success" href="/map?filter=clean" />
         <StatCard title="Out of Order" value={stats.outOfOrder} icon={Ban} variant="warning" />
         <StatCard title="Maintenance Tickets" value={stats.maintenanceTickets} icon={Wrench} href="/maintenance" />
         <StatCard title="Inspection Pending" value={stats.inspectionPending} icon={ClipboardCheck} href="/inspection" />

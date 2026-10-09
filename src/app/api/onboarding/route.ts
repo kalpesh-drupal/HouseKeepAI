@@ -3,6 +3,7 @@ import bcrypt from "bcryptjs";
 import { prisma } from "@/lib/prisma";
 import { RoomStatus, CleaningStatus, UserRole } from "@prisma/client";
 import { DEFAULT_CHECKLIST_ITEMS } from "@/lib/utils";
+import { getReportPms } from "@/lib/pms/report-catalog";
 
 export async function POST(req: NextRequest) {
   const body = await req.json();
@@ -13,6 +14,7 @@ export async function POST(req: NextRequest) {
   const floors = Math.min(50, Math.max(1, Number(body.floors) || 3));
   const fallbackRooms = Math.min(40, Math.max(0, Number(body.roomsPerFloor) || 8));
   const importRoomsLater = Boolean(body.importRoomsLater);
+  const reportPms = getReportPms(String(body.reportPms || ""));
 
   // Prefer per-floor counts; fall back to the same count on every floor
   let roomsByFloor: number[] = Array.isArray(body.roomsByFloor)
@@ -34,6 +36,9 @@ export async function POST(req: NextRequest) {
   if (!hotelName || !ownerName || !email || password.length < 8) {
     return NextResponse.json({ error: "Invalid form data" }, { status: 400 });
   }
+  if (!reportPms) {
+    return NextResponse.json({ error: "Choose the PMS you use for housekeeping reports" }, { status: 400 });
+  }
   if (!importRoomsLater && totalRooms < 1) {
     return NextResponse.json({ error: "Add at least one room" }, { status: 400 });
   }
@@ -49,6 +54,7 @@ export async function POST(req: NextRequest) {
     data: {
       name: hotelName,
       floors,
+      reportPms: reportPms.id,
       users: {
         create: {
           email,

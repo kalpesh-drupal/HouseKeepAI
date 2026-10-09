@@ -23,7 +23,7 @@ export const ROOM_STATUS_CONFIG = {
 
 export const GUEST_STAY_CONFIG = {
   VACANT: { label: "Vacant", className: "bg-slate-100 text-slate-700" },
-  OCCUPIED: { label: "Stayover", className: "bg-indigo-100 text-indigo-800" },
+  OCCUPIED: { label: "Occupied", className: "bg-indigo-100 text-indigo-800" },
   DEPARTING: { label: "Departing", className: "bg-orange-100 text-orange-800" },
   STAYOVER: { label: "Stayover", className: "bg-indigo-100 text-indigo-800" },
   ARRIVING: { label: "Arriving", className: "bg-sky-100 text-sky-800" },
@@ -37,10 +37,8 @@ export function guestStayLabel(guestStatus: keyof typeof GUEST_STAY_CONFIG, room
   if (guestStatus === "ARRIVING") return GUEST_STAY_CONFIG.ARRIVING;
   if (guestStatus === "MAINTENANCE") return GUEST_STAY_CONFIG.MAINTENANCE;
   if (guestStatus === "CHECKED_OUT") return GUEST_STAY_CONFIG.CHECKED_OUT;
-  if (guestStatus === "STAYOVER" || guestStatus === "OCCUPIED" || roomStatus === "OCCUPIED") {
-    return GUEST_STAY_CONFIG.STAYOVER;
-  }
-  if (roomStatus === "VACANT_DIRTY" || roomStatus === "CLEANING") return GUEST_STAY_CONFIG.CHECKED_OUT;
+  if (guestStatus === "STAYOVER") return GUEST_STAY_CONFIG.STAYOVER;
+  if (guestStatus === "OCCUPIED" || roomStatus === "OCCUPIED") return GUEST_STAY_CONFIG.OCCUPIED;
   return GUEST_STAY_CONFIG.VACANT;
 }
 

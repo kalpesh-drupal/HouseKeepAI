@@ -18,23 +18,28 @@ export default async function UploadPage({
   const params = await searchParams;
   const initialMode = params.mode === "build" ? "build" : params.mode === "update" ? "update" : undefined;
 
-  const [housekeepers, roomCount] = await Promise.all([
+  const [housekeepers, roomCount, hotel] = await Promise.all([
     prisma.user.findMany({
       where: { hotelId: session.user.hotelId, role: UserRole.HOUSEKEEPER, active: true },
       select: { id: true, name: true, email: true },
       orderBy: { name: "asc" },
     }),
     prisma.room.count({ where: { hotelId: session.user.hotelId } }),
+    prisma.hotel.findUnique({
+      where: { id: session.user.hotelId },
+      select: { reportPms: true },
+    }),
   ]);
 
   return (
     <div className="mx-auto max-w-3xl space-y-6">
       <div>
-        <p className="mb-1 text-sm font-medium text-primary">No PMS required</p>
+        <p className="mb-1 text-sm font-medium text-primary">Match your PMS report</p>
         <h1 className="text-3xl font-bold">Housekeeping report import</h1>
         <p className="mt-2 text-muted-foreground">
-          <strong>Build property</strong> once from your report (saves room numbers + types permanently), then use{" "}
-          <strong>Update status</strong> daily without adding extra rooms.
+          Choose SkyTouch, Choice Advantage, Synxis, or another PMS.{" "}
+          <strong>Build property</strong> saves room numbers and types, then <strong>Update status</strong> applies
+          that PMS’s housekeeping and guest-stay values.
         </p>
         <p className="mt-2 text-sm text-muted-foreground">
           Prefer live sync?{" "}
@@ -43,7 +48,12 @@ export default async function UploadPage({
           </Link>
         </p>
       </div>
-      <HkUploadForm housekeepers={housekeepers} roomCount={roomCount} initialMode={initialMode} />
+      <HkUploadForm
+        housekeepers={housekeepers}
+        roomCount={roomCount}
+        initialMode={initialMode}
+        currentPms={hotel?.reportPms}
+      />
     </div>
   );
 }

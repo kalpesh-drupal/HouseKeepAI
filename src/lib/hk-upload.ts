@@ -2,6 +2,7 @@ import { CleaningStatus, GuestStayStatus, RoomStatus } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { DEFAULT_CHECKLIST_ITEMS } from "@/lib/utils";
 import { resetRoomChecklist } from "@/lib/room-inventory";
+import { getReportPms, normalizeReportKey, type ReportPmsProfile } from "@/lib/pms/report-catalog";
 
 export type HkListRow = {
   roomNumber: string;
@@ -16,6 +17,9 @@ export type HkListRow = {
   vip?: boolean;
   guestName?: string;
   notes?: string;
+  service?: string;
+  arrivalDate?: string;
+  departureDate?: string;
   estimatedMinutes?: number;
 };
 
@@ -200,7 +204,37 @@ export function isReportStatus(raw?: string) {
   return Boolean(parseStatus(raw) || parseGuestStay(raw));
 }
 
-function statusesFromRow(row: HkListRow) {
+export function resolvePmsRowStatus(row: HkListRow, reportPms?: string) {
+  if (reportPms) {
+    const profile = getReportPms(reportPms);
+    const read = (raw?: string) => {
+      if (!profile || !raw?.trim()) return undefined;
+      return profile.statuses[normalizeReportKey(raw)];
+    };
+    const fromStatus = read(row.status);
+    const fromGuest = read(row.guestStatus);
+    const fromService = read(row.service);
+    let guest = (fromService?.guest ?? fromGuest?.guest ?? fromStatus?.guest) as GuestStayStatus | undefined;
+    const blocked = [fromStatus, fromGuest, fromService].find(
+      (item) => item?.hk === "OUT_OF_ORDER" || item?.hk === "OUT_OF_INVENTORY"
+    );
+    const hk = (blocked?.hk ?? fromStatus?.hk ?? fromGuest?.hk ?? fromService?.hk) as RoomStatus | undefined;
+    // "Checkout" on a vacant room means the guest has already left.
+    if (fromService?.guest === "DEPARTING" && (fromGuest?.guest === "VACANT" || fromStatus?.guest === "VACANT")) {
+      guest = GuestStayStatus.CHECKED_OUT;
+    }
+    const unmatched = [row.status, row.guestStatus, row.service].filter((raw): raw is string => {
+      const value = raw?.trim();
+      if (!value || !profile) return false;
+      return !profile.statuses[normalizeReportKey(value)];
+    });
+    return {
+      hk,
+      guest,
+      unmatched,
+    };
+  }
+
   const fromStatus = {
     hk: parseStatus(row.status),
     guest: parseGuestStay(row.status),
@@ -209,6 +243,7 @@ function statusesFromRow(row: HkListRow) {
   return {
     hk: fromStatus.hk,
     guest: fromGuestColumn ?? fromStatus.guest,
+    unmatched: [] as string[],
   };
 }
 
@@ -228,6 +263,23 @@ function resolveAmbiguousTypeOrStatus(value: string): { status?: string; roomTyp
   if (looksLikeRoomType(v)) return { roomType: v };
   // Unknown short codes often are status (DI, CL) already handled by parseStatus
   return { roomType: v };
+}
+
+function calendarDate(value: string) {
+  const iso = value.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (iso) return new Date(Number(iso[1]), Number(iso[2]) - 1, Number(iso[3]), 12, 0, 0);
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime()) ? undefined : parsed;
+}
+
+function reportStayFields(row: HkListRow) {
+  const arrivalDate = row.arrivalDate ? calendarDate(row.arrivalDate) : undefined;
+  const departureDate = row.departureDate ? calendarDate(row.departureDate) : undefined;
+  return {
+    ...(arrivalDate ? { arrivalDate } : {}),
+    ...(departureDate ? { departureDate } : {}),
+    ...(row.notes ? { frontDeskNotes: row.notes } : {}),
+  };
 }
 
 function cleaningForStatus(status: RoomStatus): CleaningStatus | undefined {
@@ -615,6 +667,102 @@ export function parseHkListCsv(text: string): HkListRow[] {
   return rows;
 }
 
+export type PmsHkParse = {
+  rows: HkListRow[];
+  foundHeaders: string[];
+  hasRoomColumn: boolean;
+  hasStatusColumn: boolean;
+};
+
+/** Read a housekeeping report using one PMS's exact column titles. */
+export function parsePmsHkReport(text: string, reportPms: string): PmsHkParse {
+  const profile = getReportPms(reportPms);
+  const empty = { rows: [], foundHeaders: [], hasRoomColumn: false, hasStatusColumn: false };
+  if (!profile) return empty;
+
+  const lines = text
+    .replace(/^\uFEFF/, "")
+    .split(/\r?\n/)
+    .map((l) => l.trim())
+    .filter(Boolean);
+  if (!lines.length) return empty;
+
+  let headerIndex = -1;
+  let delimiter = ",";
+  let mapped: Array<keyof HkListRow | undefined> = [];
+  let foundHeaders: string[] = [];
+
+  for (let i = 0; i < Math.min(lines.length, 40); i++) {
+    const candidateDelimiter = detectDelimiter(lines[i]);
+    const cells = splitCsvLine(lines[i], candidateDelimiter);
+    const keys = cells.map((cell) => normalizeReportKey(cell));
+    if (!keys.some((key) => profile.headers[key] === "roomNumber")) continue;
+    headerIndex = i;
+    delimiter = candidateDelimiter;
+    foundHeaders = cells.map((cell) => cell.trim()).filter(Boolean);
+    mapped = keys.map((key) => profile.headers[key] as keyof HkListRow | undefined);
+    break;
+  }
+
+  if (headerIndex < 0) {
+    const cells = splitCsvLine(lines[0], detectDelimiter(lines[0]))
+      .map((cell) => cell.trim())
+      .filter(Boolean);
+    return { ...empty, foundHeaders: cells };
+  }
+
+  const hasRoomColumn = mapped.includes("roomNumber");
+  const hasStatusColumn = mapped.some((key) => key === "status" || key === "guestStatus" || key === "service");
+  const rows: HkListRow[] = [];
+
+  for (const line of lines.slice(headerIndex + 1)) {
+    const cols = splitCsvLine(line, delimiter);
+    const firstKey = normalizeReportKey(cols[0] || "");
+    if (profile.headers[firstKey] === "roomNumber") continue;
+
+    const row: Partial<HkListRow> = {};
+    cols.forEach((val, i) => {
+      const key = mapped[i];
+      const trimmed = val.trim();
+      if (!key || !trimmed) return;
+      if (key === "priority" || key === "estimatedMinutes" || key === "floor") {
+        (row as Record<string, unknown>)[key] = Number(trimmed) || 0;
+      } else if (key === "rush" || key === "vip") {
+        (row as Record<string, unknown>)[key] = parseBool(trimmed);
+      } else {
+        (row as Record<string, unknown>)[key] = trimmed;
+      }
+    });
+
+    const roomNumber = normalizeRoomNumber(row.roomNumber || "");
+    if (!looksLikeRoomNumber(roomNumber)) continue;
+    rows.push({ ...row, roomNumber });
+  }
+
+  return { rows, foundHeaders, hasRoomColumn, hasStatusColumn };
+}
+
+function profileStatusColumns(profile: ReportPmsProfile) {
+  return profile.columns.filter((name) => {
+    const field = profile.headers[normalizeReportKey(name)];
+    return field === "status" || field === "guestStatus" || field === "service";
+  });
+}
+
+export function pmsReportError(profile: ReportPmsProfile, parsed: PmsHkParse, mode: HkImportMode) {
+  if (!parsed.hasRoomColumn) {
+    const found = parsed.foundHeaders.length ? parsed.foundHeaders.join(", ") : "none";
+    return `This file does not match a ${profile.label} report. Expected a room column named ${profile.columns[0]}. Found columns: ${found}.`;
+  }
+  if (!parsed.rows.length) {
+    return `No rooms found in this ${profile.label} report.`;
+  }
+  if (mode === "update" && !parsed.hasStatusColumn) {
+    return `This ${profile.label} report has no room-status column. Expected: ${profileStatusColumns(profile).join(", ")}.`;
+  }
+  return null;
+}
+
 function splitCsvLine(line: string, delimiter: string) {
   const result: string[] = [];
   let current = "";
@@ -649,7 +797,8 @@ export type HkImportMode = "build" | "update";
 export async function applyHkListRows(
   hotelId: string,
   rows: HkListRow[],
-  mode: HkImportMode = "update"
+  mode: HkImportMode = "update",
+  reportPms?: string
 ): Promise<HkApplyResult> {
   const [users, hotel] = await Promise.all([
     prisma.user.findMany({
@@ -719,8 +868,15 @@ export async function applyHkListRows(
       const roomType = normalizeRoomType(row.roomType);
       maxFloor = Math.max(maxFloor, floor);
 
-      const parsed = statusesFromRow(row);
+      const parsed = resolvePmsRowStatus(row, reportPms);
       const status = parsed.hk;
+      if (parsed.unmatched.length) {
+        const label = parsed.unmatched.join(" / ");
+        if (unmappedStatusSamples.length < 8 && !unmappedStatusSamples.includes(label)) {
+          unmappedStatusSamples.push(label);
+        }
+        warnings.push(`Room ${row.roomNumber}: "${label}" is not a status this PMS prints`);
+      }
       if (status || parsed.guest) statusApplied += 1;
       else statusMissing += 1;
 
@@ -739,6 +895,7 @@ export async function applyHkListRows(
               type: roomType,
               status: initialStatus,
               ...(parsed.guest ? { guestStatus: parsed.guest } : {}),
+              ...reportStayFields(row),
               cleaningStatus: cleaningForStatus(initialStatus) ?? CleaningStatus.COMPLETED,
               manualLock: true,
               checklistItems: {
@@ -769,6 +926,7 @@ export async function applyHkListRows(
               ? { status, cleaningStatus: cleaningForStatus(status) ?? CleaningStatus.NOT_STARTED }
               : {}),
             ...(parsed.guest ? { guestStatus: parsed.guest } : {}),
+            ...reportStayFields(row),
             manualLock: true,
           },
         });
@@ -819,14 +977,17 @@ export async function applyHkListRows(
     });
 
     const roomType = normalizeRoomType(row.roomType);
-    const parsed = statusesFromRow(row);
+    const parsed = resolvePmsRowStatus(row, reportPms);
     const status = parsed.hk;
-    const rawStatus = [row.status, row.guestStatus].filter(Boolean).join(" / ");
-    if (!status && !parsed.guest && rawStatus.trim()) {
-      if (unmappedStatusSamples.length < 8 && !unmappedStatusSamples.includes(rawStatus.trim())) {
-        unmappedStatusSamples.push(rawStatus.trim());
+    const rawStatus = [row.status, row.guestStatus, row.service].filter(Boolean).join(" / ");
+    if (parsed.unmatched.length) {
+      const label = parsed.unmatched.join(" / ");
+      if (unmappedStatusSamples.length < 8 && !unmappedStatusSamples.includes(label)) {
+        unmappedStatusSamples.push(label);
       }
-      warnings.push(`Room ${roomNumber}: unrecognized status "${rawStatus}"`);
+      warnings.push(`Room ${roomNumber}: "${label}" is not a status this PMS prints`);
+    }
+    if (!status && !parsed.guest && rawStatus.trim()) {
       statusMissing += 1;
     } else if (!status && !parsed.guest) {
       statusMissing += 1;
@@ -876,7 +1037,7 @@ export async function applyHkListRows(
         ...(row.rush != null ? { isRush: Boolean(row.rush) } : {}),
         ...(row.vip != null ? { isVip: Boolean(row.vip) } : {}),
         ...(row.guestName ? { guestName: row.guestName } : {}),
-        ...(row.notes ? { frontDeskNotes: row.notes } : {}),
+        ...reportStayFields(row),
         ...(row.estimatedMinutes != null ? { estimatedMinutes: Number(row.estimatedMinutes) } : {}),
         manualLock: true,
       },

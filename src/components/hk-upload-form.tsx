@@ -4,6 +4,7 @@ import { useState } from "react";
 import { useI18n } from "@/lib/i18n/context";
 import { Building2, CheckCircle2, FileSpreadsheet, RefreshCw, Upload, Users } from "lucide-react";
 import Link from "next/link";
+import { getReportPms, REPORT_PMS_LIST } from "@/lib/pms/report-catalog";
 
 type Housekeeper = { id: string; name: string; email: string };
 type ImportMode = "build" | "update";
@@ -21,6 +22,7 @@ type UploadStats = {
   statusApplied?: number;
   statusMissing?: number;
   sourceFormat?: string;
+  reportPmsLabel?: string;
   errors?: string[];
   warnings?: string[];
   unmappedStatusSamples?: string[];
@@ -30,21 +32,25 @@ export function HkUploadForm({
   housekeepers,
   roomCount,
   initialMode,
+  currentPms,
 }: {
   housekeepers: Housekeeper[];
   roomCount: number;
   initialMode?: ImportMode;
+  currentPms?: string | null;
 }) {
   const { t } = useI18n();
   const [mode, setMode] = useState<ImportMode>(
     initialMode || (roomCount === 0 ? "build" : "update")
   );
+  const [reportPms, setReportPms] = useState(currentPms || "");
   const [file, setFile] = useState<File | null>(null);
   const [paste, setPaste] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [stats, setStats] = useState<UploadStats | null>(null);
   const [preview, setPreview] = useState<Record<string, unknown>[] | null>(null);
+  const selectedPms = getReportPms(reportPms);
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
@@ -53,18 +59,25 @@ export function HkUploadForm({
     setStats(null);
     setPreview(null);
 
+    if (!reportPms) {
+      setLoading(false);
+      setError("Choose the PMS this report came from");
+      return;
+    }
+
     try {
       let res: Response;
       if (file) {
         const form = new FormData();
         form.append("file", file);
         form.append("mode", mode);
+        form.append("pms", reportPms);
         res = await fetch("/api/upload/hk-list", { method: "POST", body: form });
       } else if (paste.trim()) {
         res = await fetch("/api/upload/hk-list", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ csv: paste, mode }),
+          body: JSON.stringify({ csv: paste, mode, pms: reportPms }),
         });
       } else {
         setLoading(false);
@@ -97,6 +110,7 @@ export function HkUploadForm({
           statusApplied: Number(data.statusApplied) || 0,
           statusMissing: Number(data.statusMissing) || 0,
           sourceFormat: typeof data.sourceFormat === "string" ? data.sourceFormat : undefined,
+          reportPmsLabel: typeof data.reportPmsLabel === "string" ? data.reportPmsLabel : undefined,
           errors: Array.isArray(data.errors) ? (data.errors as string[]) : [],
           warnings: Array.isArray(data.warnings) ? (data.warnings as string[]) : [],
           unmappedStatusSamples: Array.isArray(data.unmappedStatusSamples)
@@ -115,6 +129,30 @@ export function HkUploadForm({
 
   return (
     <form onSubmit={submit} className="space-y-6">
+      <div className="rounded-2xl border border-border bg-card p-5">
+        <label className="mb-1 block text-sm font-semibold" htmlFor="report-pms">
+          PMS this report comes from
+        </label>
+        <select
+          id="report-pms"
+          required
+          value={reportPms}
+          onChange={(e) => setReportPms(e.target.value)}
+          className="w-full rounded-xl border border-border bg-background px-4 py-3 text-sm"
+        >
+          <option value="">Choose your PMS</option>
+          {REPORT_PMS_LIST.map((pms) => (
+            <option key={pms.id} value={pms.id}>
+              {pms.label}
+            </option>
+          ))}
+        </select>
+        <p className="mt-2 text-xs text-muted-foreground">
+          The import reads only this PMS’s column titles and room-status words, then updates housekeeping and guest
+          stay. The choice is saved on the hotel.
+        </p>
+      </div>
+
       <div className="grid gap-3 sm:grid-cols-2">
         <button
           type="button"
@@ -213,32 +251,30 @@ export function HkUploadForm({
             <FileSpreadsheet className="h-4 w-4 text-primary" />
             File columns
           </div>
-          {mode === "build" ? (
+          {selectedPms ? (
             <>
-              <p className="text-muted-foreground">
-                Required: <code className="rounded bg-muted px-1">Room</code>
+              <p className="font-medium">{selectedPms.label} columns</p>
+              <p className="mt-2 text-muted-foreground">
+                {selectedPms.columns.map((column) => (
+                  <code key={column} className="mr-1 mt-1 inline-block rounded bg-muted px-1">
+                    {column}
+                  </code>
+                ))}
+              </p>
+              {selectedPms.optionalColumns.length > 0 && (
+                <p className="mt-2 text-muted-foreground">
+                  Also read: {selectedPms.optionalColumns.join(", ")}
+                </p>
+              )}
+              <p className="mt-3 text-muted-foreground">
+                Housekeeping status: {selectedPms.statusValues.join(", ")}
               </p>
               <p className="mt-2 text-muted-foreground">
-                Recommended: <code className="rounded bg-muted px-1">Room Type</code>,{" "}
-                <code className="rounded bg-muted px-1">Floor</code>
+                Guest stay: {selectedPms.guestValues.join(", ")}
               </p>
-              <p className="mt-2 text-muted-foreground">Optional: Status (applied if present)</p>
             </>
           ) : (
-            <>
-              <p className="text-muted-foreground">
-                Required: <code className="rounded bg-muted px-1">Room</code>,{" "}
-                <code className="rounded bg-muted px-1">Status</code>
-              </p>
-              <p className="mt-2 text-muted-foreground">
-                Status accepts clean, dirty, out of order, and out of inventory. A separate{" "}
-                <code className="rounded bg-muted px-1">Guest Status</code> column (or the same cell) can be occupied,
-                departing, stayover, checked out, or arriving. Example: <code className="rounded bg-muted px-1">Stayover Dirty</code>.
-              </p>
-              <p className="mt-2 text-muted-foreground">
-                Optional: Housekeeper, Rush, VIP, Notes
-              </p>
-            </>
+            <p className="text-muted-foreground">Choose a PMS to see the exact column names and room statuses.</p>
           )}
           <div className="mt-4 flex flex-wrap gap-3">
             <a href="/samples/housekeeping-list.csv" download className="text-sm font-medium text-primary hover:underline">
@@ -279,11 +315,7 @@ export function HkUploadForm({
           value={paste}
           onChange={(e) => setPaste(e.target.value)}
           rows={7}
-          placeholder={
-            mode === "build"
-              ? "Room,Room Type,Floor\n101,Standard,1\n108,Suite,1\n201,Deluxe,2"
-              : "Room,Status,Housekeeper\n101,Dirty,Maria Housekeeper\n108,Clean,Maria Housekeeper"
-          }
+          placeholder={selectedPms?.sample || "Choose a PMS, then paste that system’s housekeeping report"}
           className="w-full rounded-xl border border-border px-4 py-3 font-mono text-xs"
         />
       </div>
@@ -311,6 +343,7 @@ export function HkUploadForm({
           <div className="flex items-center gap-2 font-semibold text-green-900">
             <CheckCircle2 className="h-5 w-5" />
             {stats.mode === "build" ? "Property now matches the report exactly" : "Room statuses updated from report"}
+            {stats.reportPmsLabel ? ` · ${stats.reportPmsLabel}` : ""}
           </div>
           <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3 text-sm text-green-950">
             {stats.mode === "build" ? (
