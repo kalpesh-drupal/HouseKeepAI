@@ -91,7 +91,7 @@ export function printedRoomListToCsv(raw: string): string | null {
     const dates = [...(detail[5] || "").matchAll(/\b(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+\d{1,2}\b/gi)].map((match) =>
       match[0]
     );
-    let checkIn = dates[0] ? monthDay(dates[0], year) : "";
+    const checkIn = dates[0] ? monthDay(dates[0], year) : "";
     let checkOut = dates[1] ? monthDay(dates[1], year) : "";
     if (checkIn && checkOut && checkOut < checkIn) {
       checkOut = monthDay(dates[1], year + 1);

@@ -21,7 +21,9 @@ export type ReportColumnField =
   | "service"
   | "housekeeperName"
   | "guestName"
-  | "notes";
+  | "notes"
+  | "arrivalDate"
+  | "departureDate";
 
 type StayCode =
   | "VACANT"
