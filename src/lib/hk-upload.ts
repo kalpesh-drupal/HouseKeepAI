@@ -292,6 +292,9 @@ function cleaningForStatus(status: RoomStatus): CleaningStatus | undefined {
   if (status === RoomStatus.CLEANING) {
     return CleaningStatus.IN_PROGRESS;
   }
+  if (status === RoomStatus.READY_TO_INSPECT) {
+    return CleaningStatus.NEEDS_INSPECTION;
+  }
   return undefined;
 }
 
@@ -802,7 +805,7 @@ export async function applyHkListRows(
 ): Promise<HkApplyResult> {
   const [users, hotel] = await Promise.all([
     prisma.user.findMany({
-      where: { hotelId, role: "HOUSEKEEPER", active: true },
+      where: { hotelId, role: { in: ["HOUSEKEEPER", "EXECUTIVE_HOUSEKEEPER"] }, active: true },
     }),
     prisma.hotel.findUnique({ where: { id: hotelId } }),
   ]);

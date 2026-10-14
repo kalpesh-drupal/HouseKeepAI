@@ -7,7 +7,7 @@ import { Clock, Package, Search, Shirt, Wrench } from "lucide-react";
 import { offlineAwareFetch } from "@/lib/offline/queue";
 import { useI18n } from "@/lib/i18n/context";
 import { cn } from "@/lib/utils";
-import { canFinishCleaning, canStartCleaning } from "@/lib/mobile-routes";
+import { canChooseCleanOutcome, canStartCleaning } from "@/lib/mobile-routes";
 import { MobileLostFoundForm } from "@/components/mobile-lost-found-form";
 import { MobileIssueForm } from "@/components/mobile-issue-form";
 
@@ -181,7 +181,7 @@ export function MobileRoomWork({
   );
 
   const showStart = canStartCleaning(status, cleaningStatus);
-  const showFinish = canFinishCleaning(status, cleaningStatus);
+  const showOutcome = canChooseCleanOutcome(status, cleaningStatus);
 
   return (
     <div className="space-y-3">
@@ -196,15 +196,25 @@ export function MobileRoomWork({
             {loading === "start_cleaning" ? "..." : t("startCleaning")}
           </button>
         )}
-        {showFinish && (
-          <button
-            type="button"
-            onClick={() => act("finish_cleaning")}
-            disabled={!!loading}
-            className="col-span-2 rounded-xl bg-green-600 px-3 py-3 text-sm font-medium text-white disabled:opacity-50"
-          >
-            {loading === "finish_cleaning" ? "..." : t("finishCleaning")}
-          </button>
+        {showOutcome && (
+          <>
+            <button
+              type="button"
+              onClick={() => act("mark_clean")}
+              disabled={!!loading}
+              className="rounded-xl bg-green-600 px-3 py-3 text-sm font-medium text-white disabled:opacity-50"
+            >
+              {loading === "mark_clean" ? "..." : t("markClean")}
+            </button>
+            <button
+              type="button"
+              onClick={() => act("ready_to_inspect")}
+              disabled={!!loading}
+              className="rounded-xl bg-amber-500 px-3 py-3 text-sm font-medium text-white disabled:opacity-50"
+            >
+              {loading === "ready_to_inspect" ? "..." : t("readyToInspect")}
+            </button>
+          </>
         )}
         {actions.map((action) => (
           <button

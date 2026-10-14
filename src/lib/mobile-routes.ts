@@ -38,3 +38,18 @@ export function canStartCleaning(status: RoomStatus, cleaningStatus: CleaningSta
 export function canFinishCleaning(status: RoomStatus, cleaningStatus: CleaningStatus) {
   return status === RoomStatus.CLEANING || cleaningStatus === CleaningStatus.IN_PROGRESS;
 }
+
+/** Dirty rooms and rooms already being cleaned can be marked clean or ready to inspect. */
+export function canChooseCleanOutcome(status: RoomStatus, cleaningStatus: CleaningStatus) {
+  if (
+    status === RoomStatus.READY_TO_INSPECT ||
+    status === RoomStatus.VACANT_CLEAN ||
+    status === RoomStatus.INSPECTED ||
+    status === RoomStatus.OCCUPIED ||
+    status === RoomStatus.MAINTENANCE ||
+    status === RoomStatus.OUT_OF_INVENTORY
+  ) {
+    return false;
+  }
+  return canStartCleaning(status, cleaningStatus) || canFinishCleaning(status, cleaningStatus);
+}

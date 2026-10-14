@@ -13,7 +13,12 @@ export default async function MobileDashboardPage() {
   const [rooms, openTickets, pendingInspections, messages] = await Promise.all([
     getRoomsForUser(hotelId, session.user.id, role),
     prisma.maintenanceTicket.count({ where: { hotelId, status: { not: "COMPLETED" } } }),
-    prisma.inspection.count({ where: { room: { hotelId }, status: "PENDING" } }),
+    prisma.room.count({
+      where: {
+        hotelId,
+        OR: [{ status: "READY_TO_INSPECT" }, { cleaningStatus: "NEEDS_INSPECTION" }],
+      },
+    }),
     prisma.message.count({
       where: {
         hotelId,
@@ -43,8 +48,8 @@ export default async function MobileDashboardPage() {
     },
     {
       href: "/m/inspection",
-      title: "Inspection",
-      detail: `${pendingInspections} pending`,
+      title: "Ready to inspect",
+      detail: `${pendingInspections} room${pendingInspections === 1 ? "" : "s"}`,
       icon: ClipboardCheck,
       show: ["INSPECTOR", "EXECUTIVE_HOUSEKEEPER", "OWNER", "GENERAL_MANAGER"].includes(role),
     },

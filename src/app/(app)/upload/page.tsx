@@ -1,6 +1,7 @@
 import { requireAuth } from "@/lib/session";
 import { UserRole } from "@prisma/client";
 import { HkUploadForm } from "@/components/hk-upload-form";
+import { CLEANING_STAFF_ROLES, cleaningStaffLabel } from "@/lib/utils";
 import { prisma } from "@/lib/prisma";
 import Link from "next/link";
 
@@ -20,9 +21,9 @@ export default async function UploadPage({
 
   const [housekeepers, roomCount, hotel] = await Promise.all([
     prisma.user.findMany({
-      where: { hotelId: session.user.hotelId, role: UserRole.HOUSEKEEPER, active: true },
-      select: { id: true, name: true, email: true },
-      orderBy: { name: "asc" },
+      where: { hotelId: session.user.hotelId, role: { in: CLEANING_STAFF_ROLES }, active: true },
+      select: { id: true, name: true, email: true, role: true },
+      orderBy: [{ role: "asc" }, { name: "asc" }],
     }),
     prisma.room.count({ where: { hotelId: session.user.hotelId } }),
     prisma.hotel.findUnique({
@@ -49,7 +50,11 @@ export default async function UploadPage({
         </p>
       </div>
       <HkUploadForm
-        housekeepers={housekeepers}
+        housekeepers={housekeepers.map((hk) => ({
+          id: hk.id,
+          email: hk.email,
+          name: cleaningStaffLabel(hk.name, hk.role),
+        }))}
         roomCount={roomCount}
         initialMode={initialMode}
         currentPms={hotel?.reportPms}

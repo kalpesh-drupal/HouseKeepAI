@@ -119,7 +119,7 @@ export default async function DashboardPage() {
         <StatCard title="Clean" value={stats.vacantClean} icon={CheckCircle} variant="success" href="/map?filter=clean" />
         <StatCard title="Out of Order" value={stats.outOfOrder} icon={Ban} variant="warning" />
         <StatCard title="Maintenance Tickets" value={stats.maintenanceTickets} icon={Wrench} href="/maintenance" />
-        <StatCard title="Inspection Pending" value={stats.inspectionPending} icon={ClipboardCheck} href="/inspection" />
+        <StatCard title="Ready to inspect" value={stats.inspectionPending} icon={ClipboardCheck} href="/inspection" />
         <StatCard title="Rush Rooms" value={stats.rushRooms} icon={Zap} variant="danger" />
         <StatCard title="VIP Rooms" value={stats.vipRooms} icon={Crown} variant="warning" />
         <StatCard title="Guest Requests" value={stats.guestRequests} icon={MessageSquare} href="/front-desk" />

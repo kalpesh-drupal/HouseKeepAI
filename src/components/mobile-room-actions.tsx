@@ -5,7 +5,7 @@ import { useState } from "react";
 import { CleaningStatus, RoomStatus } from "@prisma/client";
 import { offlineAwareFetch } from "@/lib/offline/queue";
 import { useI18n } from "@/lib/i18n/context";
-import { canFinishCleaning, canStartCleaning } from "@/lib/mobile-routes";
+import { canChooseCleanOutcome, canStartCleaning } from "@/lib/mobile-routes";
 
 export function MobileRoomActions({
   roomId,
@@ -22,7 +22,7 @@ export function MobileRoomActions({
   const [error, setError] = useState<string | null>(null);
 
   const showStart = canStartCleaning(status, cleaningStatus);
-  const showFinish = canFinishCleaning(status, cleaningStatus);
+  const showOutcome = canChooseCleanOutcome(status, cleaningStatus);
 
   async function act(action: string) {
     setLoading(action);
@@ -46,7 +46,7 @@ export function MobileRoomActions({
     }
   }
 
-  if (!showStart && !showFinish) return null;
+  if (!showStart && !showOutcome) return null;
 
   return (
     <div className="grid grid-cols-2 gap-2">
@@ -61,15 +61,28 @@ export function MobileRoomActions({
           {loading === "start_cleaning" ? "..." : t("startCleaning")}
         </button>
       )}
-      {showFinish && (
-        <button
-          type="button"
-          onClick={() => act("finish_cleaning")}
-          disabled={!!loading}
-          className="col-span-2 rounded-xl bg-green-600 px-3 py-3 text-sm font-medium text-white disabled:opacity-50"
-        >
-          {loading === "finish_cleaning" ? "..." : t("finishCleaning")}
-        </button>
+      {showOutcome && (
+        <>
+          <button
+            type="button"
+            onClick={() => act("mark_clean")}
+            disabled={!!loading}
+            className="rounded-xl bg-green-600 px-3 py-3 text-sm font-medium text-white disabled:opacity-50"
+          >
+            {loading === "mark_clean" ? "..." : t("markClean")}
+          </button>
+          <button
+            type="button"
+            onClick={() => act("ready_to_inspect")}
+            disabled={!!loading}
+            className="rounded-xl bg-amber-500 px-3 py-3 text-sm font-medium text-white disabled:opacity-50"
+          >
+            {loading === "ready_to_inspect" ? "..." : t("readyToInspect")}
+          </button>
+          <p className="col-span-2 text-xs text-muted-foreground">
+            Mark clean when this hotel skips inspection. Choose ready to inspect when the head housekeeper must check the room first.
+          </p>
+        </>
       )}
     </div>
   );

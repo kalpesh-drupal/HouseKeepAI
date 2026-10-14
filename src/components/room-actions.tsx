@@ -5,6 +5,8 @@ import { useState } from "react";
 import { CleaningStatus, RoomStatus, UserRole } from "@prisma/client";
 import { Loader2 } from "lucide-react";
 import { offlineAwareFetch } from "@/lib/offline/queue";
+import { canChooseCleanOutcome } from "@/lib/mobile-routes";
+import { canInspectRooms } from "@/lib/utils";
 
 interface RoomActionsProps {
   roomId: string;
@@ -33,6 +35,8 @@ export function RoomActions({
   const router = useRouter();
   const [loading, setLoading] = useState<string | null>(null);
   const canManage = MANAGER_ROLES.includes(userRole);
+  const showOutcome = canChooseCleanOutcome(status, cleaningStatus);
+  const awaitingInspection = status === RoomStatus.READY_TO_INSPECT || cleaningStatus === CleaningStatus.NEEDS_INSPECTION;
 
   async function performAction(action: string) {
     setLoading(action);
@@ -52,14 +56,19 @@ export function RoomActions({
       show: status === RoomStatus.VACANT_DIRTY || cleaningStatus === CleaningStatus.NOT_STARTED,
     },
     {
-      action: "finish_cleaning",
-      label: "Finish Cleaning",
-      show: status === RoomStatus.CLEANING || cleaningStatus === CleaningStatus.IN_PROGRESS,
+      action: "mark_clean",
+      label: "Mark clean",
+      show: showOutcome || (awaitingInspection && canInspectRooms(userRole)),
     },
     {
-      action: "request_inspection",
-      label: "Request Inspection",
-      show: status === RoomStatus.VACANT_CLEAN || cleaningStatus === CleaningStatus.COMPLETED,
+      action: "ready_to_inspect",
+      label: "Ready to inspect",
+      show: showOutcome,
+    },
+    {
+      action: "send_back",
+      label: "Send back dirty",
+      show: awaitingInspection && canInspectRooms(userRole),
     },
     { action: "report_issue", label: "Report Issue", show: true },
     { action: "block_ooo", label: "Out of Order", show: canManage && status !== RoomStatus.OUT_OF_ORDER },

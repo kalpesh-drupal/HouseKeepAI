@@ -36,7 +36,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     });
     await prisma.room.update({
       where: { id: inspection.roomId },
-      data: { status: "INSPECTED", cleaningStatus: "COMPLETED" },
+      data: { status: "VACANT_CLEAN", cleaningStatus: "COMPLETED", cleaningStartedAt: null },
     });
   }
 

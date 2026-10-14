@@ -4,7 +4,7 @@ import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { cn } from "@/lib/utils";
 
-export type HousekeeperOption = { id: string; name: string };
+export type HousekeeperOption = { id: string; name: string; label?: string };
 
 export function AssignHousekeeperSelect({
   roomId,
@@ -64,7 +64,7 @@ export function AssignHousekeeperSelect({
       <option value="">Unassigned</option>
       {housekeepers.map((hk) => (
         <option key={hk.id} value={hk.id}>
-          {hk.name}
+          {hk.label ?? hk.name}
         </option>
       ))}
     </select>

@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
-import { canAssignHousekeepers } from "@/lib/utils";
+import { canAssignHousekeepers, CLEANING_STAFF_ROLES } from "@/lib/utils";
 
 /** Bulk assign (or unassign) rooms to a housekeeper. */
 export async function POST(req: NextRequest) {
@@ -26,7 +26,7 @@ export async function POST(req: NextRequest) {
       where: {
         id: housekeeperId,
         hotelId: session.user.hotelId,
-        role: "HOUSEKEEPER",
+        role: { in: CLEANING_STAFF_ROLES },
         active: true,
       },
       select: { id: true },

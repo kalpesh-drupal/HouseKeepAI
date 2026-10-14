@@ -23,6 +23,7 @@ type Room = {
 const FILTERS = [
   { key: "all", label: "All" },
   { key: "dirty", label: "Dirty", status: RoomStatus.VACANT_DIRTY },
+  { key: "inspect", label: "Ready to inspect", status: RoomStatus.READY_TO_INSPECT },
   { key: "clean", label: "Clean", status: RoomStatus.VACANT_CLEAN },
   { key: "vip", label: "VIP" },
   { key: "arrival", label: "Arrival" },
@@ -76,6 +77,8 @@ export function HotelMap({
     switch (filter) {
       case "dirty":
         return room.status === RoomStatus.VACANT_DIRTY;
+      case "inspect":
+        return room.status === RoomStatus.READY_TO_INSPECT;
       case "clean":
         return room.status === RoomStatus.VACANT_CLEAN || room.status === RoomStatus.INSPECTED;
       case "vip":

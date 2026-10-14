@@ -1,27 +1,34 @@
 import { requireAuth } from "@/lib/session";
-import { getRoomsForUser } from "@/lib/queries";
+import { getRoomsForUser, getRoomsReadyToInspect } from "@/lib/queries";
 import { prisma } from "@/lib/prisma";
 import Link from "next/link";
 import { ChecklistToggle } from "@/components/checklist-toggle";
 import { Crown, Zap, Clock } from "lucide-react";
-import { canAssignHousekeepers, guestStayLabel, ROOM_STATUS_CONFIG } from "@/lib/utils";
+import { canAssignHousekeepers, canInspectRooms, cleaningStaffLabel, CLEANING_STAFF_ROLES, guestStayLabel, isCleaningStaff, ROOM_STATUS_CONFIG } from "@/lib/utils";
 import { RoomAssignmentBoard } from "@/components/room-assignment-board";
 import { MobileRoomActions } from "@/components/mobile-room-actions";
 import { CleaningTimer } from "@/components/cleaning-timer";
+import { ReadyToInspectList } from "@/components/ready-to-inspect-list";
 
 export default async function HousekeepingPage() {
   const session = await requireAuth();
   const canAssign = canAssignHousekeepers(session.user.role);
-  const [rooms, housekeepers] = await Promise.all([
+  const canInspect = canInspectRooms(session.user.role);
+  const [rooms, housekeepers, readyRooms] = await Promise.all([
     getRoomsForUser(session.user.hotelId, session.user.id, session.user.role),
     canAssign
       ? prisma.user.findMany({
-          where: { hotelId: session.user.hotelId, role: "HOUSEKEEPER", active: true },
-          select: { id: true, name: true },
-          orderBy: { name: "asc" },
+          where: { hotelId: session.user.hotelId, role: { in: CLEANING_STAFF_ROLES }, active: true },
+          select: { id: true, name: true, role: true },
+          orderBy: [{ role: "asc" }, { name: "asc" }],
         })
       : Promise.resolve([]),
+    canInspect ? getRoomsReadyToInspect(session.user.hotelId) : Promise.resolve([]),
   ]);
+  const myRooms =
+    session.user.role === "HOUSEKEEPER"
+      ? rooms
+      : rooms.filter((room) => room.housekeeperId === session.user.id);
 
   return (
     <div className="space-y-6">
@@ -47,18 +54,48 @@ export default async function HousekeepingPage() {
             isVip: room.isVip,
             isRush: room.isRush,
           }))}
-          housekeepers={housekeepers}
+          housekeepers={housekeepers.map((hk) => ({
+            id: hk.id,
+            name: hk.name,
+            label: cleaningStaffLabel(hk.name, hk.role),
+          }))}
         />
       )}
 
-      {session.user.role === "HOUSEKEEPER" && (
-        rooms.length === 0 ? (
+      {canInspect && (
+        <section className="space-y-3">
+          <div>
+            <h2 className="text-xl font-semibold">Ready to inspect</h2>
+            <p className="text-sm text-muted-foreground">
+              Check rooms other housekeepers marked ready to inspect, then mark them clean.
+            </p>
+          </div>
+          <ReadyToInspectList
+            rooms={readyRooms.map((room) => ({
+              id: room.id,
+              number: room.number,
+              floor: room.floor,
+              housekeeperName: room.housekeeper?.name ?? null,
+              href: `/rooms/${room.id}`,
+            }))}
+          />
+        </section>
+      )}
+
+      {(session.user.role === "HOUSEKEEPER" || (isCleaningStaff(session.user.role) && myRooms.length > 0)) && (
+        myRooms.length === 0 ? (
           <div className="rounded-2xl border border-border bg-card p-12 text-center">
             <p className="text-muted-foreground">No rooms assigned.</p>
           </div>
         ) : (
         <div className="space-y-6">
-          {rooms.map((room) => {
+          {session.user.role !== "HOUSEKEEPER" && (
+            <div>
+              <h2 className="text-xl font-semibold">Your rooms</h2>
+              <p className="text-sm text-muted-foreground">Rooms assigned to you. Start cleaning, then mark them clean or ready to inspect.</p>
+            </div>
+          )}
+          {myRooms.map((room) => {
             const config = ROOM_STATUS_CONFIG[room.status];
             return (
               <div key={room.id} className="rounded-2xl border border-border bg-card p-6">

@@ -20,6 +20,7 @@ enum UserRole {
 enum RoomStatus {
   VACANT_DIRTY
   CLEANING
+  READY_TO_INSPECT
   VACANT_CLEAN
   INSPECTED
   OCCUPIED

@@ -15,7 +15,7 @@ export async function POST() {
 
   const insights = await buildAiInsights(session.user.hotelId);
   const housekeepers = await prisma.user.findMany({
-    where: { hotelId: session.user.hotelId, role: "HOUSEKEEPER", active: true },
+    where: { hotelId: session.user.hotelId, role: { in: ["HOUSEKEEPER", "EXECUTIVE_HOUSEKEEPER"] }, active: true },
   });
 
   let assigned = 0;

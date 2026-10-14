@@ -13,6 +13,7 @@ export const ROLE_LABELS: Record<UserRole, string> = {
 export const ROOM_STATUS_CONFIG = {
   VACANT_DIRTY: { label: "Dirty", color: "bg-red-500", text: "text-red-700", bg: "bg-red-50", emoji: "🟥" },
   CLEANING: { label: "Cleaning", color: "bg-yellow-500", text: "text-yellow-700", bg: "bg-yellow-50", emoji: "🟨" },
+  READY_TO_INSPECT: { label: "Ready to inspect", color: "bg-amber-500", text: "text-amber-800", bg: "bg-amber-50", emoji: "🟧" },
   VACANT_CLEAN: { label: "Clean", color: "bg-green-500", text: "text-green-700", bg: "bg-green-50", emoji: "🟩" },
   INSPECTED: { label: "Inspected", color: "bg-blue-500", text: "text-blue-700", bg: "bg-blue-50", emoji: "🟦" },
   OCCUPIED: { label: "Occupied", color: "bg-slate-400", text: "text-slate-700", bg: "bg-slate-50", emoji: "⚪" },
@@ -93,8 +94,32 @@ const ASSIGN_HOUSEKEEPER_ROLES: UserRole[] = [
   UserRole.FRONT_DESK,
 ];
 
+export const CLEANING_STAFF_ROLES: UserRole[] = [
+  UserRole.HOUSEKEEPER,
+  UserRole.EXECUTIVE_HOUSEKEEPER,
+];
+
+const INSPECT_ROLES: UserRole[] = [
+  UserRole.EXECUTIVE_HOUSEKEEPER,
+  UserRole.INSPECTOR,
+  UserRole.OWNER,
+  UserRole.GENERAL_MANAGER,
+];
+
 export function canAssignHousekeepers(role: UserRole) {
   return ASSIGN_HOUSEKEEPER_ROLES.includes(role);
+}
+
+export function isCleaningStaff(role: UserRole) {
+  return CLEANING_STAFF_ROLES.includes(role);
+}
+
+export function canInspectRooms(role: UserRole) {
+  return INSPECT_ROLES.includes(role);
+}
+
+export function cleaningStaffLabel(name: string, role: UserRole) {
+  return role === UserRole.EXECUTIVE_HOUSEKEEPER ? `${name} (Head housekeeper)` : name;
 }
 
 export function cn(...classes: (string | boolean | undefined | null)[]) {

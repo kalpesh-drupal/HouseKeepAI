@@ -9,7 +9,9 @@ import {
   resetRoomChecklist,
   updateHotelRoomInventory,
 } from "@/lib/room-inventory";
-import { canAssignHousekeepers } from "@/lib/utils";
+import { canAssignHousekeepers, canInspectRooms, CLEANING_STAFF_ROLES, isCleaningStaff } from "@/lib/utils";
+import { isAwaitingInspection, markRoomClean, markRoomReadyToInspect, sendRoomBackDirty } from "@/lib/room-cleaning";
+import { canChooseCleanOutcome } from "@/lib/mobile-routes";
 
 export async function DELETE(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const session = await getServerSession(authOptions);
@@ -81,54 +83,43 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
           cleaningStatus: CleaningStatus.IN_PROGRESS,
           manualLock: true,
           cleaningStartedAt: new Date(),
-          housekeeperId: session.user.role === "HOUSEKEEPER" ? session.user.id : room.housekeeperId,
+          housekeeperId: isCleaningStaff(session.user.role) ? session.user.id : room.housekeeperId,
         },
       });
       await resetRoomChecklist(id);
       break;
 
     case "finish_cleaning":
-      await prisma.room.update({
-        where: { id },
-        data: {
-          status: RoomStatus.VACANT_CLEAN,
-          cleaningStatus: CleaningStatus.NEEDS_INSPECTION,
-          manualLock: true,
-          cleaningStartedAt: null,
-        },
-      });
-      await prisma.inspection.create({
-        data: {
-          roomId: id,
-          inspectorId: room.inspectorId ?? session.user.id,
-          status: "PENDING",
-          items: {
-            create: [
-              "Bathroom", "Bed", "Hair", "Dust", "Coffee", "Amenities",
-              "Remote", "TV", "AC", "Curtains", "Windows", "Mirror", "Furniture",
-            ].map((label, i) => ({ label, sortOrder: i })),
-          },
-        },
-      });
-      {
-        const items = await prisma.inventoryItem.findMany({
-          where: { hotelId: session.user.hotelId, usagePerClean: { gt: 0 } },
-        });
-        for (const item of items) {
-          await prisma.inventoryItem.update({
-            where: { id: item.id },
-            data: { quantity: Math.max(0, item.quantity - item.usagePerClean) },
-          });
-        }
+    case "mark_clean": {
+      const awaiting = isAwaitingInspection(room);
+      if (awaiting && !canInspectRooms(session.user.role)) {
+        return NextResponse.json({ error: "Only the head housekeeper can mark this room clean" }, { status: 403 });
       }
+      if (!awaiting && !canChooseCleanOutcome(room.status, room.cleaningStatus)) {
+        return NextResponse.json({ error: "This room cannot be marked clean right now" }, { status: 400 });
+      }
+      await markRoomClean(room, session.user.id, isCleaningStaff(session.user.role));
+      break;
+    }
+
+    case "ready_to_inspect":
+    case "request_inspection":
+      if (!canChooseCleanOutcome(room.status, room.cleaningStatus)) {
+        return NextResponse.json({ error: "This room cannot be sent for inspection right now" }, { status: 400 });
+      }
+      await markRoomReadyToInspect(room, session.user.id, isCleaningStaff(session.user.role));
       break;
 
-    case "request_inspection":
-      await prisma.room.update({
-        where: { id },
-        data: { cleaningStatus: CleaningStatus.NEEDS_INSPECTION },
-      });
+    case "send_back": {
+      if (!canInspectRooms(session.user.role)) {
+        return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+      }
+      if (!isAwaitingInspection(room)) {
+        return NextResponse.json({ error: "This room is not waiting for inspection" }, { status: 400 });
+      }
+      await sendRoomBackDirty(room);
       break;
+    }
 
     case "report_issue":
       await prisma.maintenanceTicket.create({
@@ -272,7 +263,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
           where: {
             id: nextId,
             hotelId: session.user.hotelId,
-            role: "HOUSEKEEPER",
+            role: { in: CLEANING_STAFF_ROLES },
             active: true,
           },
           select: { id: true, name: true },

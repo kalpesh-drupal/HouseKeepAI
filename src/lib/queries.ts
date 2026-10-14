@@ -1,5 +1,5 @@
 import { prisma } from "./prisma";
-import { UserRole, RoomStatus } from "@prisma/client";
+import { UserRole, RoomStatus, CleaningStatus } from "@prisma/client";
 
 export async function getDashboardStats(hotelId: string) {
   const today = new Date();
@@ -41,8 +41,14 @@ export async function getDashboardStats(hotelId: string) {
     prisma.maintenanceTicket.count({
       where: { hotelId, status: { not: "COMPLETED" } },
     }),
-    prisma.inspection.count({
-      where: { room: { hotelId }, status: "PENDING" },
+    prisma.room.count({
+      where: {
+        hotelId,
+        OR: [
+          { status: RoomStatus.READY_TO_INSPECT },
+          { cleaningStatus: CleaningStatus.NEEDS_INSPECTION },
+        ],
+      },
     }),
     prisma.room.count({ where: { hotelId, isRush: true } }),
     prisma.room.count({ where: { hotelId, isVip: true, OR: [{ status: RoomStatus.OCCUPIED }, { guestStatus: { in: ["OCCUPIED", "STAYOVER", "ARRIVING"] } }] } }),
@@ -52,6 +58,9 @@ export async function getDashboardStats(hotelId: string) {
   ]);
 
   const cleaning = rooms.filter((r) => r.status === RoomStatus.CLEANING).length;
+  const readyToInspect = rooms.filter(
+    (r) => r.status === RoomStatus.READY_TO_INSPECT || r.cleaningStatus === CleaningStatus.NEEDS_INSPECTION
+  ).length;
   const inspected = rooms.filter((r) => r.status === RoomStatus.INSPECTED).length;
   const maintenance = rooms.filter((r) => r.status === RoomStatus.MAINTENANCE).length;
 
@@ -73,6 +82,7 @@ export async function getDashboardStats(hotelId: string) {
       cleaningProgress: [
         { name: "Dirty", value: vacantDirty, color: "#ef4444" },
         { name: "Cleaning", value: cleaning, color: "#eab308" },
+        { name: "Ready to inspect", value: readyToInspect, color: "#f59e0b" },
         { name: "Clean", value: vacantClean, color: "#22c55e" },
         { name: "Inspected", value: inspected, color: "#3b82f6" },
       ],
@@ -86,6 +96,7 @@ export async function getDashboardStats(hotelId: string) {
       roomStatus: [
         { name: "Occupied", value: occupied },
         { name: "Dirty", value: vacantDirty },
+        { name: "Ready to inspect", value: readyToInspect },
         { name: "Clean", value: vacantClean },
         { name: "Maintenance", value: maintenance },
         { name: "OOO", value: outOfOrder },
@@ -137,6 +148,20 @@ export async function getRoomById(roomId: string, hotelId: string) {
       guestRequests: { orderBy: { createdAt: "desc" } },
       photos: { orderBy: { createdAt: "desc" } },
     },
+  });
+}
+
+export async function getRoomsReadyToInspect(hotelId: string) {
+  return prisma.room.findMany({
+    where: {
+      hotelId,
+      OR: [
+        { status: RoomStatus.READY_TO_INSPECT },
+        { cleaningStatus: CleaningStatus.NEEDS_INSPECTION },
+      ],
+    },
+    include: { housekeeper: { select: { name: true } } },
+    orderBy: [{ floor: "asc" }, { number: "asc" }],
   });
 }
 

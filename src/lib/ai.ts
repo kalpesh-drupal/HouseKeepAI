@@ -41,7 +41,7 @@ export async function buildAiInsights(hotelId: string): Promise<AiInsights> {
       },
     }),
     prisma.user.findMany({
-      where: { hotelId, role: "HOUSEKEEPER", active: true },
+      where: { hotelId, role: { in: ["HOUSEKEEPER", "EXECUTIVE_HOUSEKEEPER"] }, active: true },
       select: { id: true, name: true },
     }),
     prisma.maintenanceTicket.findMany({ where: { hotelId }, include: { room: true } }),

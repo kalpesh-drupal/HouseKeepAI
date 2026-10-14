@@ -2,7 +2,7 @@ import { requireAuth } from "@/lib/session";
 import { getRoomById } from "@/lib/queries";
 import { prisma } from "@/lib/prisma";
 import { notFound } from "next/navigation";
-import { canAssignHousekeepers, guestStayLabel, ROOM_STATUS_CONFIG } from "@/lib/utils";
+import { canAssignHousekeepers, CLEANING_STAFF_ROLES, cleaningStaffLabel, guestStayLabel, ROOM_STATUS_CONFIG } from "@/lib/utils";
 import { RoomActions } from "@/components/room-actions";
 import { RoomQrCard } from "@/components/room-qr";
 import { RoomPhotoPanel } from "@/components/room-photo-panel";
@@ -19,9 +19,9 @@ export default async function RoomDetailsPage({ params }: { params: Promise<{ id
     getRoomById(id, session.user.hotelId),
     canAssign
       ? prisma.user.findMany({
-          where: { hotelId: session.user.hotelId, role: "HOUSEKEEPER", active: true },
-          select: { id: true, name: true },
-          orderBy: { name: "asc" },
+          where: { hotelId: session.user.hotelId, role: { in: CLEANING_STAFF_ROLES }, active: true },
+          select: { id: true, name: true, role: true },
+          orderBy: [{ role: "asc" }, { name: "asc" }],
         })
       : Promise.resolve([]),
   ]);
@@ -73,7 +73,11 @@ export default async function RoomDetailsPage({ params }: { params: Promise<{ id
                   <AssignHousekeeperSelect
                     roomId={room.id}
                     housekeeperId={room.housekeeperId}
-                    housekeepers={housekeepers}
+                    housekeepers={housekeepers.map((hk) => ({
+                      id: hk.id,
+                      name: hk.name,
+                      label: cleaningStaffLabel(hk.name, hk.role),
+                    }))}
                   />
                 ) : (
                   room.housekeeper?.name ?? "Unassigned"
