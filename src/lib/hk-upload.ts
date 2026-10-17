@@ -3,6 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { DEFAULT_CHECKLIST_ITEMS } from "@/lib/utils";
 import { resetRoomChecklist } from "@/lib/room-inventory";
 import { getReportPms, normalizeReportKey, type ReportPmsProfile } from "@/lib/pms/report-catalog";
+import { calendarDayKey, isStayoverRoom } from "@/lib/stay";
 
 export type HkListRow = {
   roomNumber: string;
@@ -272,13 +273,39 @@ function calendarDate(value: string) {
   return Number.isNaN(parsed.getTime()) ? undefined : parsed;
 }
 
+function optionalReportDate(value: string | undefined) {
+  if (value === undefined) return undefined;
+  if (!value.trim()) return null;
+  return calendarDate(value) ?? null;
+}
+
 function reportStayFields(row: HkListRow) {
-  const arrivalDate = row.arrivalDate ? calendarDate(row.arrivalDate) : undefined;
-  const departureDate = row.departureDate ? calendarDate(row.departureDate) : undefined;
+  const arrivalDate = optionalReportDate(row.arrivalDate);
+  const departureDate = optionalReportDate(row.departureDate);
   return {
-    ...(arrivalDate ? { arrivalDate } : {}),
-    ...(departureDate ? { departureDate } : {}),
-    ...(row.notes ? { frontDeskNotes: row.notes } : {}),
+    ...(arrivalDate !== undefined ? { arrivalDate } : {}),
+    ...(departureDate !== undefined ? { departureDate } : {}),
+    ...(row.notes !== undefined ? { frontDeskNotes: row.notes.trim() || null } : {}),
+  };
+}
+
+function stayImportUpdate(
+  row: HkListRow,
+  guest: GuestStayStatus | undefined,
+  existing?: { arrivalDate: Date | null; departureDate: Date | null; guestStatus: GuestStayStatus; doNotDisturb: boolean }
+) {
+  const fields = reportStayFields(row);
+  const nextGuest = guest ?? existing?.guestStatus;
+  const nextArrival = fields.arrivalDate === undefined ? existing?.arrivalDate : fields.arrivalDate;
+  const nextDeparture = fields.departureDate === undefined ? existing?.departureDate : fields.departureDate;
+  const arrivalChanged =
+    !!existing?.arrivalDate &&
+    !!nextArrival &&
+    calendarDayKey(existing.arrivalDate) !== calendarDayKey(nextArrival);
+  const stillStayover = isStayoverRoom(nextGuest, nextArrival, nextDeparture);
+  return {
+    ...fields,
+    ...(!stillStayover || arrivalChanged ? { doNotDisturb: false } : {}),
   };
 }
 
@@ -727,7 +754,13 @@ export function parsePmsHkReport(text: string, reportPms: string): PmsHkParse {
     cols.forEach((val, i) => {
       const key = mapped[i];
       const trimmed = val.trim();
-      if (!key || !trimmed) return;
+      if (!key) return;
+      if (!trimmed) {
+        if (key === "arrivalDate" || key === "departureDate" || key === "notes") {
+          (row as Record<string, unknown>)[key] = "";
+        }
+        return;
+      }
       if (key === "priority" || key === "estimatedMinutes" || key === "floor") {
         (row as Record<string, unknown>)[key] = Number(trimmed) || 0;
       } else if (key === "rush" || key === "vip") {
@@ -898,7 +931,7 @@ export async function applyHkListRows(
               type: roomType,
               status: initialStatus,
               ...(parsed.guest ? { guestStatus: parsed.guest } : {}),
-              ...reportStayFields(row),
+              ...stayImportUpdate(row, parsed.guest),
               cleaningStatus: cleaningForStatus(initialStatus) ?? CleaningStatus.COMPLETED,
               manualLock: true,
               checklistItems: {
@@ -929,7 +962,7 @@ export async function applyHkListRows(
               ? { status, cleaningStatus: cleaningForStatus(status) ?? CleaningStatus.NOT_STARTED }
               : {}),
             ...(parsed.guest ? { guestStatus: parsed.guest } : {}),
-            ...reportStayFields(row),
+            ...stayImportUpdate(row, parsed.guest, existing),
             manualLock: true,
           },
         });
@@ -1040,7 +1073,7 @@ export async function applyHkListRows(
         ...(row.rush != null ? { isRush: Boolean(row.rush) } : {}),
         ...(row.vip != null ? { isVip: Boolean(row.vip) } : {}),
         ...(row.guestName ? { guestName: row.guestName } : {}),
-        ...reportStayFields(row),
+        ...stayImportUpdate(row, parsed.guest, room),
         ...(row.estimatedMinutes != null ? { estimatedMinutes: Number(row.estimatedMinutes) } : {}),
         manualLock: true,
       },

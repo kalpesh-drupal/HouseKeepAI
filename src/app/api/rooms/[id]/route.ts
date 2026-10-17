@@ -12,6 +12,9 @@ import {
 import { canAssignHousekeepers, canInspectRooms, CLEANING_STAFF_ROLES, isCleaningStaff } from "@/lib/utils";
 import { isAwaitingInspection, markRoomClean, markRoomReadyToInspect, sendRoomBackDirty } from "@/lib/room-cleaning";
 import { canChooseCleanOutcome } from "@/lib/mobile-routes";
+import { isStayoverRoom } from "@/lib/stay";
+import { beginCleaningSession } from "@/lib/cleaning-log";
+import { rollHotelDay } from "@/lib/day-roll";
 
 export async function DELETE(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const session = await getServerSession(authOptions);
@@ -75,19 +78,41 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   if (!room) return NextResponse.json({ error: "Room not found" }, { status: 404 });
 
   switch (action) {
-    case "start_cleaning":
+    case "toggle_dnd": {
+      if (!isStayoverRoom(room.guestStatus, room.arrivalDate, room.departureDate)) {
+        return NextResponse.json({ error: "DND is only for stayover rooms" }, { status: 400 });
+      }
+      const updated = await prisma.room.update({
+        where: { id },
+        data: { doNotDisturb: !room.doNotDisturb, manualLock: true },
+      });
+      return NextResponse.json({ success: true, doNotDisturb: updated.doNotDisturb });
+    }
+
+    case "start_cleaning": {
+      await rollHotelDay(session.user.hotelId);
+      const startedAt = new Date();
+      const housekeeperId = isCleaningStaff(session.user.role) ? session.user.id : room.housekeeperId;
       await prisma.room.update({
         where: { id },
         data: {
           status: RoomStatus.CLEANING,
           cleaningStatus: CleaningStatus.IN_PROGRESS,
           manualLock: true,
-          cleaningStartedAt: new Date(),
-          housekeeperId: isCleaningStaff(session.user.role) ? session.user.id : room.housekeeperId,
+          cleaningStartedAt: startedAt,
+          housekeeperId,
         },
+      });
+      await beginCleaningSession({
+        hotelId: room.hotelId,
+        roomId: room.id,
+        roomNumber: room.number,
+        housekeeperId,
+        startedAt,
       });
       await resetRoomChecklist(id);
       break;
+    }
 
     case "finish_cleaning":
     case "mark_clean": {

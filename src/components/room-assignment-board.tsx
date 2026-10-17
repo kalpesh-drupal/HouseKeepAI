@@ -7,6 +7,7 @@ import { GuestStayStatus, RoomStatus } from "@prisma/client";
 import { guestStayLabel, ROOM_STATUS_CONFIG, cn } from "@/lib/utils";
 import { ApplyAiAssignmentsButton } from "@/components/apply-ai-assignments";
 import { AssignHousekeeperSelect, type HousekeeperOption } from "@/components/assign-housekeeper-select";
+import { RoomStayCue } from "@/components/room-stay-cue";
 
 type AssignableRoom = {
   id: string;
@@ -18,6 +19,10 @@ type AssignableRoom = {
   housekeeperName: string | null;
   isVip: boolean;
   isRush: boolean;
+  arrivalDate?: Date | string | null;
+  departureDate?: Date | string | null;
+  notes?: string | null;
+  doNotDisturb?: boolean;
 };
 
 const FILTERS = [
@@ -256,6 +261,16 @@ export function RoomAssignmentBoard({
                         {room.isRush ? "RUSH" : ""}
                       </span>
                     )}
+                    <span className="ml-2">
+                      <RoomStayCue
+                        roomId={room.id}
+                        guestStatus={room.guestStatus}
+                        arrivalDate={room.arrivalDate}
+                        departureDate={room.departureDate}
+                        notes={room.notes}
+                        doNotDisturb={room.doNotDisturb}
+                      />
+                    </span>
                   </td>
                   <td className="px-3 py-2 text-muted-foreground">{room.floor}</td>
                   <td className="px-3 py-2">

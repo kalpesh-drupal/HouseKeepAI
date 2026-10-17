@@ -187,6 +187,9 @@ export async function POST(req: NextRequest) {
       reportStatus: [row.status, row.guestStatus, row.service].filter(Boolean).join(" / "),
       housekeeping: resolved.hk || "",
       guestStay: resolved.guest || "",
+      checkIn: row.arrivalDate || "",
+      checkOut: row.departureDate || "",
+      notes: row.notes || "",
     };
   });
   return NextResponse.json({

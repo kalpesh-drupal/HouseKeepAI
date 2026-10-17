@@ -1,5 +1,14 @@
 import { prisma } from "./prisma";
-import { UserRole, RoomStatus, CleaningStatus } from "@prisma/client";
+import { UserRole, RoomStatus, CleaningStatus, CleaningOutcome } from "@prisma/client";
+import {
+  businessDate,
+  businessDateFromKey,
+  businessDateKey,
+  formatBusinessDate,
+  periodBusinessRange,
+  periodInstantRange,
+  type ReportPeriod,
+} from "@/lib/business-day";
 
 export async function getDashboardStats(hotelId: string) {
   const today = new Date();
@@ -102,7 +111,7 @@ export async function getDashboardStats(hotelId: string) {
         { name: "OOO", value: outOfOrder },
         { name: "Out of inventory", value: rooms.filter((r) => r.status === RoomStatus.OUT_OF_INVENTORY).length },
       ],
-      avgCleaningTime: 28,
+      avgCleaningTime: await averageCleaningMinutes(hotelId),
       inspectionScore: 92,
     },
   };
@@ -269,104 +278,239 @@ export async function getGuestRequests(hotelId: string) {
   });
 }
 
-export async function getReportData(hotelId: string, period: "daily" | "weekly" | "monthly" = "daily") {
-  const now = new Date();
-  const from = new Date(now);
-  if (period === "daily") from.setHours(0, 0, 0, 0);
-  if (period === "weekly") from.setDate(from.getDate() - 7);
-  if (period === "monthly") from.setDate(from.getDate() - 30);
+const FINISHED_OUTCOMES = [CleaningOutcome.CLEAN, CleaningOutcome.READY_TO_INSPECT] as const;
 
-  const [
-    rooms,
-    inspections,
-    tickets,
-    guestRequests,
-    inventory,
-    lostFound,
-    laundry,
-  ] = await Promise.all([
-    prisma.room.findMany({ where: { hotelId } }),
-    prisma.inspection.findMany({
-      where: { room: { hotelId }, createdAt: { gte: from } },
-      include: { room: true },
-    }),
-    prisma.maintenanceTicket.findMany({
-      where: { hotelId, createdAt: { gte: from } },
-      include: { room: true },
-    }),
-    prisma.guestRequest.findMany({
-      where: { hotelId, createdAt: { gte: from } },
-      include: { room: true },
-    }),
-    prisma.inventoryItem.findMany({ where: { hotelId } }),
-    prisma.lostFoundItem.findMany({
-      where: { hotelId, createdAt: { gte: from } },
-    }),
-    prisma.laundryBatch.findMany({
-      where: { hotelId, updatedAt: { gte: from } },
-    }),
-  ]);
+async function averageCleaningMinutes(hotelId: string) {
+  const hotel = await prisma.hotel.findUnique({
+    where: { id: hotelId },
+    select: { timezone: true },
+  });
+  const sessions = await prisma.cleaningSession.findMany({
+    where: {
+      hotelId,
+      businessDate: businessDate(new Date(), hotel?.timezone),
+      outcome: { in: [...FINISHED_OUTCOMES] },
+      durationSeconds: { not: null },
+    },
+    select: { durationSeconds: true },
+  });
+  if (!sessions.length) return 0;
+  const total = sessions.reduce((sum, session) => sum + (session.durationSeconds ?? 0), 0);
+  return Math.round(total / sessions.length / 60);
+}
 
-  const approved = inspections.filter((i) => i.status === "APPROVED").length;
-  const rejected = inspections.filter((i) => i.status === "REJECTED").length;
-  const completedTickets = tickets.filter((t) => t.status === "COMPLETED").length;
-  const avgInspectionScore =
-    inspections.filter((i) => i.score != null).reduce((sum, i) => sum + (i.score ?? 0), 0) /
-      Math.max(inspections.filter((i) => i.score != null).length, 1) || 0;
+function reportPeriod(value?: string): ReportPeriod {
+  if (value === "month" || value === "monthly") return "month";
+  if (value === "year" || value === "yearly") return "year";
+  return "day";
+}
 
-  const cleanedInPeriod = rooms.filter(
-    (r) =>
-      (r.status === RoomStatus.VACANT_CLEAN || r.status === RoomStatus.INSPECTED) &&
-      r.updatedAt >= from
-  ).length;
+export async function getReportData(
+  hotelId: string,
+  options: { period?: string; date?: string; employeeId?: string } = {}
+) {
+  const period = reportPeriod(options.period);
+  const hotel = await prisma.hotel.findUnique({
+    where: { id: hotelId },
+    select: { timezone: true },
+  });
+  const openDate = businessDate(new Date(), hotel?.timezone);
+  const anchor = (options.date ? businessDateFromKey(options.date) : null) ?? openDate;
+  const { from, to } = periodBusinessRange(anchor, period);
+  const { start, end } = periodInstantRange(anchor, period, hotel?.timezone);
+  const employeeId = options.employeeId || "";
+  const openKey = businessDateKey(openDate);
+  const openInPeriod = businessDateKey(from) <= openKey && openKey < businessDateKey(to);
+
+  const [employees, snapshots, sessions, inspections, tickets, guestRequests, inventory, lostFound, laundry, liveRooms] =
+    await Promise.all([
+      prisma.user.findMany({
+        where: {
+          hotelId,
+          active: true,
+          role: { in: [UserRole.HOUSEKEEPER, UserRole.EXECUTIVE_HOUSEKEEPER] },
+        },
+        select: { id: true, name: true },
+        orderBy: { name: "asc" },
+      }),
+      prisma.roomDaySnapshot.findMany({
+        where: {
+          hotelId,
+          businessDate: { gte: from, lt: to },
+          ...(employeeId ? { housekeeperId: employeeId } : {}),
+        },
+        orderBy: [{ businessDate: "asc" }, { roomNumber: "asc" }],
+      }),
+      prisma.cleaningSession.findMany({
+        where: {
+          hotelId,
+          businessDate: { gte: from, lt: to },
+          ...(employeeId ? { housekeeperId: employeeId } : {}),
+        },
+      }),
+      prisma.inspection.findMany({
+        where: {
+          room: { hotelId },
+          createdAt: { gte: start, lt: end },
+          ...(employeeId ? { inspectorId: employeeId } : {}),
+        },
+      }),
+      prisma.maintenanceTicket.findMany({
+        where: {
+          hotelId,
+          createdAt: { gte: start, lt: end },
+          ...(employeeId ? { createdById: employeeId } : {}),
+        },
+      }),
+      prisma.guestRequest.findMany({
+        where: {
+          hotelId,
+          createdAt: { gte: start, lt: end },
+          ...(employeeId ? { assignedToId: employeeId } : {}),
+        },
+      }),
+      prisma.inventoryItem.findMany({ where: { hotelId } }),
+      prisma.lostFoundItem.findMany({
+        where: {
+          hotelId,
+          createdAt: { gte: start, lt: end },
+          ...(employeeId ? { foundById: employeeId } : {}),
+        },
+      }),
+      prisma.laundryBatch.findMany({
+        where: { hotelId, updatedAt: { gte: start, lt: end } },
+      }),
+      prisma.room.findMany({
+        where: { hotelId, ...(employeeId ? { housekeeperId: employeeId } : {}) },
+        include: { housekeeper: { select: { name: true } } },
+        orderBy: { number: "asc" },
+      }),
+    ]);
+
+  const savedOpen = snapshots.some((row) => businessDateKey(row.businessDate) === openKey);
+  const roomRecords = snapshots.map((row) => ({
+    date: businessDateKey(row.businessDate),
+    roomNumber: row.roomNumber,
+    status: row.status,
+    guestStatus: row.guestStatus,
+    housekeeperName: row.housekeeperName,
+    doNotDisturb: row.doNotDisturb,
+    notes: row.frontDeskNotes,
+    saved: true,
+  }));
+  if (openInPeriod && !savedOpen) {
+    for (const room of liveRooms) {
+      roomRecords.push({
+        date: openKey,
+        roomNumber: room.number,
+        status: room.status,
+        guestStatus: room.guestStatus,
+        housekeeperName: room.housekeeper?.name ?? null,
+        doNotDisturb: room.doNotDisturb,
+        notes: room.frontDeskNotes,
+        saved: false,
+      });
+    }
+  }
+
+  const statusCounts = new Map<string, number>();
+  for (const room of roomRecords) {
+    statusCounts.set(room.status, (statusCounts.get(room.status) ?? 0) + 1);
+  }
+
+  const employeeStats = new Map<
+    string,
+    { id: string; name: string; rooms: number; totalSeconds: number; unfinished: number }
+  >();
+  const ensureEmployee = (id: string, name: string) => {
+    const existing = employeeStats.get(id);
+    if (existing) {
+      if (existing.name === "Unassigned" && name) existing.name = name;
+      return existing;
+    }
+    const created = { id, name: name || "Unassigned", rooms: 0, totalSeconds: 0, unfinished: 0 };
+    employeeStats.set(id, created);
+    return created;
+  };
+  for (const employee of employees) {
+    if (employeeId && employee.id !== employeeId) continue;
+    ensureEmployee(employee.id, employee.name);
+  }
+  for (const session of sessions) {
+    const row = ensureEmployee(session.housekeeperId || "unassigned", session.housekeeperName || "Unassigned");
+    if (session.outcome === CleaningOutcome.UNFINISHED) row.unfinished += 1;
+    if (
+      session.outcome &&
+      FINISHED_OUTCOMES.includes(session.outcome as (typeof FINISHED_OUTCOMES)[number]) &&
+      session.durationSeconds != null
+    ) {
+      row.rooms += 1;
+      row.totalSeconds += session.durationSeconds;
+    }
+  }
+
+  const finished = sessions.filter(
+    (session) =>
+      session.outcome &&
+      FINISHED_OUTCOMES.includes(session.outcome as (typeof FINISHED_OUTCOMES)[number]) &&
+      session.durationSeconds != null
+  );
+  const totalSeconds = finished.reduce((sum, session) => sum + (session.durationSeconds ?? 0), 0);
+  const scored = inspections.filter((inspection) => inspection.score != null);
 
   return {
     period,
-    periodFrom: from.toISOString(),
-    periodTo: now.toISOString(),
-    cleaningPerformance: {
-      dirty: rooms.filter((r) => r.status === RoomStatus.VACANT_DIRTY).length,
-      cleaning: rooms.filter((r) => r.status === RoomStatus.CLEANING).length,
-      clean: rooms.filter((r) => r.status === RoomStatus.VACANT_CLEAN || r.status === RoomStatus.INSPECTED).length,
-      rush: rooms.filter((r) => r.isRush).length,
-      completedInPeriod: cleanedInPeriod,
-    },
-    avgCleaningTime: period === "daily" ? 28 : period === "weekly" ? 30 : 32,
+    date: businessDateKey(anchor),
+    label: formatBusinessDate(anchor, period),
+    openDate: openKey,
+    dayIsOpen: period === "day" && businessDateKey(anchor) === openKey && !savedOpen,
+    employees,
+    employeeId,
+    statusCounts: [...statusCounts.entries()].map(([status, count]) => ({ status, count })),
+    roomCount: roomRecords.length,
+    roomRows: period === "day" ? roomRecords : [],
+    employeeRows: [...employeeStats.values()]
+      .map((row) => ({
+        ...row,
+        avgMinutes: row.rooms ? Math.round(row.totalSeconds / row.rooms / 60) : 0,
+        totalMinutes: Math.round(row.totalSeconds / 60),
+      }))
+      .sort((a, b) => a.name.localeCompare(b.name)),
+    avgCleaningTime: finished.length ? Math.round(totalSeconds / finished.length / 60) : 0,
+    cleansFinished: finished.length,
     inspectionScores: {
-      approved,
-      rejected,
-      pending: inspections.filter((i) => i.status === "PENDING").length,
-      avgScore: Math.round(avgInspectionScore),
+      approved: inspections.filter((inspection) => inspection.status === "APPROVED").length,
+      rejected: inspections.filter((inspection) => inspection.status === "REJECTED").length,
+      pending: inspections.filter((inspection) => inspection.status === "PENDING").length,
+      avgScore: scored.length
+        ? Math.round(scored.reduce((sum, inspection) => sum + (inspection.score ?? 0), 0) / scored.length)
+        : 0,
     },
     maintenance: {
-      open: tickets.filter((t) => t.status !== "COMPLETED").length,
-      completed: completedTickets,
-      highPriority: tickets.filter((t) => t.priority === "HIGH" || t.priority === "URGENT").length,
-      oooRooms: rooms.filter((r) => r.status === RoomStatus.OUT_OF_ORDER).length,
+      open: tickets.filter((ticket) => ticket.status !== "COMPLETED").length,
+      completed: tickets.filter((ticket) => ticket.status === "COMPLETED").length,
     },
-    inventoryUsage: inventory.map((i) => ({
-      category: i.category,
-      quantity: i.quantity,
-      usagePerClean: i.usagePerClean,
+    inventoryUsage: inventory.map((item) => ({
+      category: item.category,
+      quantity: item.quantity,
     })),
     guestRequests: {
-      open: guestRequests.filter((r) => r.status === "OPEN").length,
-      assigned: guestRequests.filter((r) => r.status === "ASSIGNED").length,
-      completed: guestRequests.filter((r) => r.status === "COMPLETED").length,
-      byType: Object.entries(
-        guestRequests.reduce<Record<string, number>>((acc, r) => {
-          acc[r.type] = (acc[r.type] ?? 0) + 1;
-          return acc;
-        }, {})
-      ).map(([type, count]) => ({ type, count })),
+      open: guestRequests.filter((request) => request.status === "OPEN").length,
+      assigned: guestRequests.filter((request) => request.status === "ASSIGNED").length,
+      completed: guestRequests.filter((request) => request.status === "COMPLETED").length,
     },
     lostFound: {
-      stored: lostFound.filter((i) => i.status === "STORED").length,
-      claimed: lostFound.filter((i) => i.status === "CLAIMED").length,
-      disposed: lostFound.filter((i) => i.status === "DISPOSED").length,
+      stored: lostFound.filter((item) => item.status === "STORED").length,
+      claimed: lostFound.filter((item) => item.status === "CLAIMED").length,
+      disposed: lostFound.filter((item) => item.status === "DISPOSED").length,
     },
-    laundry: laundry.map((b) => ({ itemType: b.itemType, status: b.status, quantity: b.quantity })),
-    roomTurnaround: rooms.filter((r) => r.status === RoomStatus.VACANT_DIRTY || r.status === RoomStatus.CLEANING).length,
+    laundry: laundry.map((batch) => ({
+      itemType: batch.itemType,
+      status: batch.status,
+      quantity: batch.quantity,
+    })),
+    roomTurnaround: roomRecords.filter((room) => room.status === RoomStatus.VACANT_DIRTY || room.status === RoomStatus.CLEANING)
+      .length,
   };
 }
 

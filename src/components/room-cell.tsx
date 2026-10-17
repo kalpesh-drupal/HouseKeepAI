@@ -1,6 +1,7 @@
 import { RoomStatus } from "@prisma/client";
 import Link from "next/link";
 import { ROOM_STATUS_CONFIG, cn } from "@/lib/utils";
+import { changeBeddingDue, type StayDate } from "@/lib/stay";
 
 interface RoomCellProps {
   id: string;
@@ -11,10 +12,28 @@ interface RoomCellProps {
   compact?: boolean;
   type?: string;
   assignee?: string | null;
+  guestStatus?: string | null;
+  arrivalDate?: StayDate;
+  departureDate?: StayDate;
+  doNotDisturb?: boolean;
 }
 
-export function RoomCell({ id, number, status, isVip, isRush, compact, type, assignee }: RoomCellProps) {
+export function RoomCell({
+  id,
+  number,
+  status,
+  isVip,
+  isRush,
+  compact,
+  type,
+  assignee,
+  guestStatus,
+  arrivalDate,
+  departureDate,
+  doNotDisturb,
+}: RoomCellProps) {
   const config = ROOM_STATUS_CONFIG[status];
+  const bedding = changeBeddingDue(guestStatus, arrivalDate, departureDate);
 
   return (
     <Link
@@ -26,6 +45,8 @@ export function RoomCell({ id, number, status, isVip, isRush, compact, type, ass
       )}
     >
       <span className={cn("text-lg font-bold", config.text)}>{number}</span>
+      {bedding && <span className="px-0.5 text-center text-[8px] font-semibold leading-tight text-orange-800">Change the bedding</span>}
+      {doNotDisturb && <span className="text-[8px] font-bold text-zinc-800">DND</span>}
       {type ? (
         <span className="line-clamp-2 px-0.5 text-center text-[9px] leading-tight text-muted-foreground">
           {type}

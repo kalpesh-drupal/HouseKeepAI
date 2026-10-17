@@ -10,6 +10,7 @@ import { RoomNotesEditor } from "@/components/room-notes-editor";
 import { AssignHousekeeperSelect } from "@/components/assign-housekeeper-select";
 import Link from "next/link";
 import { ArrowLeft, Crown, Zap } from "lucide-react";
+import { RoomStayCue } from "@/components/room-stay-cue";
 
 export default async function RoomDetailsPage({ params }: { params: Promise<{ id: string }> }) {
   const session = await requireAuth();
@@ -43,6 +44,14 @@ export default async function RoomDetailsPage({ params }: { params: Promise<{ id
             <h1 className="text-3xl font-bold">Room {room.number}</h1>
             {room.isVip && <span className="flex items-center gap-1 rounded-full bg-amber-100 px-3 py-1 text-sm font-medium text-amber-800"><Crown className="h-4 w-4" /> VIP</span>}
             {room.isRush && <span className="flex items-center gap-1 rounded-full bg-red-100 px-3 py-1 text-sm font-medium text-red-800"><Zap className="h-4 w-4" /> Rush</span>}
+            <RoomStayCue
+              roomId={room.id}
+              guestStatus={room.guestStatus}
+              arrivalDate={room.arrivalDate}
+              departureDate={room.departureDate}
+              notes={room.frontDeskNotes}
+              doNotDisturb={room.doNotDisturb}
+            />
           </div>
           <p className="text-muted-foreground">Floor {room.floor} · {room.type}</p>
         </div>

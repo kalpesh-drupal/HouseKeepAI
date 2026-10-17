@@ -10,6 +10,7 @@ import { ChecklistToggle } from "@/components/checklist-toggle";
 import { CleaningTimer } from "@/components/cleaning-timer";
 import Link from "next/link";
 import { ArrowLeft } from "lucide-react";
+import { RoomStayCue } from "@/components/room-stay-cue";
 
 const LINEN_CATEGORIES = ["Towels", "Pillows", "Sheets", "Blankets"];
 
@@ -46,10 +47,22 @@ export default async function MobileRoomPage({
         <ArrowLeft className="h-4 w-4" /> Back
       </Link>
       <div className="flex items-center justify-between">
-        <h2 className="flex items-baseline gap-2 text-2xl font-bold">
-          Room {room.number}
-          <CleaningTimer startedAt={room.cleaningStartedAt} active={room.status === "CLEANING"} />
-        </h2>
+        <div>
+          <h2 className="flex flex-wrap items-baseline gap-2 text-2xl font-bold">
+            Room {room.number}
+            <CleaningTimer startedAt={room.cleaningStartedAt} active={room.status === "CLEANING"} />
+          </h2>
+          <div className="mt-2">
+            <RoomStayCue
+              roomId={room.id}
+              guestStatus={room.guestStatus}
+              arrivalDate={room.arrivalDate}
+              departureDate={room.departureDate}
+              notes={room.frontDeskNotes}
+              doNotDisturb={room.doNotDisturb}
+            />
+          </div>
+        </div>
         <span className={`rounded-full px-2 py-1 text-xs ${cfg.bg}`}>{cfg.label}</span>
       </div>
       <p className="text-sm text-muted-foreground">

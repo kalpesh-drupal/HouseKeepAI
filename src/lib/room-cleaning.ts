@@ -2,14 +2,17 @@ import { CleaningStatus, RoomStatus, UserRole } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { INSPECTION_CHECKLIST_ITEMS } from "@/lib/utils";
 import { resetRoomChecklist } from "@/lib/room-inventory";
+import { finishCleaningSession } from "@/lib/cleaning-log";
 
 type RoomWork = {
   id: string;
   hotelId: string;
+  number: string;
   status: RoomStatus;
   cleaningStatus: CleaningStatus;
   housekeeperId: string | null;
   inspectorId: string | null;
+  cleaningStartedAt: Date | null;
 };
 
 function finishedCleaning(room: RoomWork) {
@@ -65,6 +68,14 @@ export async function markRoomClean(room: RoomWork, actorId: string, actorIsStaf
   if (claimingFinish) {
     await consumeSupplies(room.hotelId);
   }
+  await finishCleaningSession({
+    hotelId: room.hotelId,
+    roomId: room.id,
+    roomNumber: room.number,
+    housekeeperId: claimHousekeeper(room, actorId, actorIsStaff),
+    cleaningStartedAt: room.cleaningStartedAt,
+    outcome: "CLEAN",
+  });
   await closePendingInspections(room.id, "APPROVED");
   await prisma.room.update({
     where: { id: room.id },
@@ -82,6 +93,14 @@ export async function markRoomReadyToInspect(room: RoomWork, actorId: string, ac
   if (finishedCleaning(room)) {
     await consumeSupplies(room.hotelId);
   }
+  await finishCleaningSession({
+    hotelId: room.hotelId,
+    roomId: room.id,
+    roomNumber: room.number,
+    housekeeperId: claimHousekeeper(room, actorId, actorIsStaff),
+    cleaningStartedAt: room.cleaningStartedAt,
+    outcome: "READY_TO_INSPECT",
+  });
   const inspectorId = await inspectorFor(room, actorId);
   const pending = await prisma.inspection.findFirst({
     where: { roomId: room.id, status: "PENDING" },

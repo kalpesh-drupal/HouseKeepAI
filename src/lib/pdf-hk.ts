@@ -179,6 +179,13 @@ export function housekeepingCheckOffToCsv(raw: string): string | null {
     const dates = dateTokens.map(slashDate).filter(Boolean);
     const checkIn = dates.length >= 2 ? dates[0] : "";
     const checkOut = dates.length >= 2 ? dates[1] : "";
+    const afterDates = tail
+      .split(/\d{1,2}\/\d{1,2}\/\d{2,4}/)
+      .slice(1)
+      .join(" ")
+      .replace(/\s+/g, " ")
+      .trim();
+    if (afterDates) notes = [notes, afterDates].filter(Boolean).join(" · ");
     const occupancy = status[3].toUpperCase() === "OCC" ? "Occupied" : "Vacant";
     const guest = stay || (occupancy === "Occupied" ? "Occupied" : "Vacant");
     const condition = /^dirty$/i.test(status[4]) ? "Dirty" : "Ready";

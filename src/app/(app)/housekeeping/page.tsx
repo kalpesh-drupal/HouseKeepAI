@@ -9,6 +9,7 @@ import { RoomAssignmentBoard } from "@/components/room-assignment-board";
 import { MobileRoomActions } from "@/components/mobile-room-actions";
 import { CleaningTimer } from "@/components/cleaning-timer";
 import { ReadyToInspectList } from "@/components/ready-to-inspect-list";
+import { RoomStayCue } from "@/components/room-stay-cue";
 
 export default async function HousekeepingPage() {
   const session = await requireAuth();
@@ -53,6 +54,10 @@ export default async function HousekeepingPage() {
             housekeeperName: room.housekeeper?.name ?? null,
             isVip: room.isVip,
             isRush: room.isRush,
+            arrivalDate: room.arrivalDate,
+            departureDate: room.departureDate,
+            notes: room.frontDeskNotes,
+            doNotDisturb: room.doNotDisturb,
           }))}
           housekeepers={housekeepers.map((hk) => ({
             id: hk.id,
@@ -117,6 +122,14 @@ export default async function HousekeepingPage() {
                       </span>
                       {room.isVip && <Crown className="h-5 w-5 text-amber-500" />}
                       {room.isRush && <Zap className="h-5 w-5 text-red-500" />}
+                      <RoomStayCue
+                        roomId={room.id}
+                        guestStatus={room.guestStatus}
+                        arrivalDate={room.arrivalDate}
+                        departureDate={room.departureDate}
+                        notes={room.frontDeskNotes}
+                        doNotDisturb={room.doNotDisturb}
+                      />
                     </div>
                     <div className="mt-2 flex gap-4 text-sm text-muted-foreground">
                       <span>Priority: {room.priority}</span>

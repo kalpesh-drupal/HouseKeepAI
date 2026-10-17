@@ -3,14 +3,24 @@ import { getReportData } from "@/lib/queries";
 import { ExportButtons } from "@/components/export-buttons";
 import { UserRole } from "@prisma/client";
 import { StatCard } from "@/components/stat-card";
+import { GUEST_STAY_CONFIG, ROOM_STATUS_CONFIG } from "@/lib/utils";
+import { formatDuration } from "@/lib/business-day";
 import Link from "next/link";
 
-type Period = "daily" | "weekly" | "monthly";
+type Period = "day" | "month" | "year";
+
+function statusLabel(status: string) {
+  return ROOM_STATUS_CONFIG[status as keyof typeof ROOM_STATUS_CONFIG]?.label ?? status;
+}
+
+function guestLabel(status: string) {
+  return GUEST_STAY_CONFIG[status as keyof typeof GUEST_STAY_CONFIG]?.label ?? status;
+}
 
 export default async function ReportsPage({
   searchParams,
 }: {
-  searchParams: Promise<{ period?: string }>;
+  searchParams: Promise<{ period?: string; date?: string; employee?: string }>;
 }) {
   const session = await requireAuth([
     UserRole.OWNER,
@@ -18,33 +28,42 @@ export default async function ReportsPage({
     UserRole.EXECUTIVE_HOUSEKEEPER,
   ]);
   const params = await searchParams;
-  const period: Period =
-    params.period === "weekly" || params.period === "monthly" ? params.period : "daily";
-  const data = await getReportData(session.user.hotelId, period);
-
-  const exportRows = [
-    { Metric: "Period", Value: period },
-    { Metric: "Dirty Rooms", Value: data.cleaningPerformance.dirty },
-    { Metric: "Cleaning In Progress", Value: data.cleaningPerformance.cleaning },
-    { Metric: "Clean Rooms", Value: data.cleaningPerformance.clean },
-    { Metric: "Completed In Period", Value: data.cleaningPerformance.completedInPeriod },
-    { Metric: "Rush Rooms", Value: data.cleaningPerformance.rush },
-    { Metric: "Avg Cleaning Time (min)", Value: data.avgCleaningTime },
-    { Metric: "Inspection Avg Score", Value: data.inspectionScores.avgScore },
-    { Metric: "Inspections Approved", Value: data.inspectionScores.approved },
-    { Metric: "Inspections Rejected", Value: data.inspectionScores.rejected },
-    { Metric: "Open Maintenance", Value: data.maintenance.open },
-    { Metric: "Completed Maintenance", Value: data.maintenance.completed },
-    { Metric: "OOO Rooms", Value: data.maintenance.oooRooms },
-    { Metric: "Guest Requests Open", Value: data.guestRequests.open },
-    { Metric: "Lost & Found Stored", Value: data.lostFound.stored },
-    { Metric: "Room Turnaround Pending", Value: data.roomTurnaround },
-  ];
+  const period: Period = params.period === "month" || params.period === "year" ? params.period : "day";
+  const data = await getReportData(session.user.hotelId, {
+    period,
+    date: params.date,
+    employeeId: params.employee,
+  });
 
   const periods: { key: Period; label: string }[] = [
-    { key: "daily", label: "Daily" },
-    { key: "weekly", label: "Weekly" },
-    { key: "monthly", label: "Monthly" },
+    { key: "day", label: "Day" },
+    { key: "month", label: "Month" },
+    { key: "year", label: "Year" },
+  ];
+
+  const query = (nextPeriod: Period) => {
+    const search = new URLSearchParams({ period: nextPeriod, date: data.date });
+    if (data.employeeId) search.set("employee", data.employeeId);
+    return `/reports?${search.toString()}`;
+  };
+
+  const exportRows: Record<string, string | number>[] = [
+    ...data.employeeRows.map((row) => ({
+      Type: "Employee",
+      Date: data.label,
+      Name: row.name,
+      Detail: `${row.rooms} rooms cleaned`,
+      Minutes: row.totalMinutes,
+      Average: row.avgMinutes,
+    })),
+    ...data.roomRows.map((row) => ({
+      Type: "Room",
+      Date: row.date,
+      Name: row.roomNumber,
+      Detail: `${statusLabel(row.status)} / ${guestLabel(row.guestStatus)}${row.doNotDisturb ? " / DND" : ""}`,
+      Minutes: "",
+      Average: row.housekeeperName || "",
+    })),
   ];
 
   return (
@@ -53,54 +72,150 @@ export default async function ReportsPage({
         <div>
           <h1 className="text-3xl font-bold">Reports</h1>
           <p className="text-muted-foreground">
-            {period.charAt(0).toUpperCase() + period.slice(1)} operations metrics · since{" "}
-            {new Date(data.periodFrom).toLocaleDateString()}
+            {data.label}
+            {data.dayIsOpen ? " · today is still open and will be saved at 3:00 AM" : ""}
           </p>
         </div>
-        <ExportButtons filename={`housekeepai-report-${period}`} rows={exportRows} />
+        <ExportButtons filename={`housekeepai-report-${period}-${data.date}`} rows={exportRows} />
       </div>
 
-      <div className="flex flex-wrap gap-2">
-        {periods.map((p) => (
+      <div className="flex flex-wrap items-end gap-3">
+        {periods.map((item) => (
           <Link
-            key={p.key}
-            href={`/reports?period=${p.key}`}
+            key={item.key}
+            href={query(item.key)}
             className={`rounded-xl px-4 py-2 text-sm font-medium transition ${
-              period === p.key
-                ? "bg-primary text-white"
-                : "border border-border bg-card hover:bg-muted"
+              period === item.key ? "bg-primary text-white" : "border border-border bg-card hover:bg-muted"
             }`}
           >
-            {p.label}
+            {item.label}
           </Link>
         ))}
+        <form className="flex flex-wrap items-end gap-2" method="get">
+          <input type="hidden" name="period" value={period} />
+          <label className="text-sm">
+            <span className="mb-1 block text-muted-foreground">Date</span>
+            <input
+              type="date"
+              name="date"
+              defaultValue={data.date}
+              className="rounded-xl border border-border px-3 py-2"
+            />
+          </label>
+          <label className="text-sm">
+            <span className="mb-1 block text-muted-foreground">Employee</span>
+            <select
+              name="employee"
+              defaultValue={data.employeeId}
+              className="rounded-xl border border-border px-3 py-2"
+            >
+              <option value="">All employees</option>
+              {data.employees.map((employee) => (
+                <option key={employee.id} value={employee.id}>
+                  {employee.name}
+                </option>
+              ))}
+            </select>
+          </label>
+          <button type="submit" className="rounded-xl bg-primary px-4 py-2 text-sm font-medium text-white">
+            Apply
+          </button>
+        </form>
       </div>
 
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <StatCard
-          title="Cleaning Performance"
-          value={data.cleaningPerformance.clean}
-          subtitle={`${data.cleaningPerformance.dirty} dirty · ${data.cleaningPerformance.cleaning} cleaning · ${data.cleaningPerformance.completedInPeriod} done`}
-          variant="success"
+          title={period === "day" ? "Rooms" : "Room-days"}
+          value={data.roomCount}
+          subtitle={data.statusCounts.map((item) => `${item.count} ${statusLabel(item.status)}`).join(" · ") || "No rooms saved"}
         />
-        <StatCard title="Avg Cleaning Time" value={`${data.avgCleaningTime}m`} />
+        <StatCard title="Cleans finished" value={data.cleansFinished} subtitle="Marked clean or ready to inspect" variant="success" />
+        <StatCard title="Avg cleaning time" value={`${data.avgCleaningTime}m`} subtitle="Finished cleans in this period" />
         <StatCard
-          title="Inspection Score"
+          title="Inspection score"
           value={`${data.inspectionScores.avgScore}%`}
           subtitle={`${data.inspectionScores.approved} approved · ${data.inspectionScores.rejected} rejected`}
           variant="info"
         />
-        <StatCard
-          title="Maintenance Open"
-          value={data.maintenance.open}
-          subtitle={`${data.maintenance.completed} completed`}
-          variant="warning"
-        />
       </div>
+
+      <div className="rounded-2xl border border-border bg-card p-6">
+        <h2 className="mb-4 font-semibold">Cleaning time by employee</h2>
+        {data.employeeRows.length === 0 ? (
+          <p className="text-sm text-muted-foreground">No housekeepers in this hotel.</p>
+        ) : (
+          <div className="overflow-auto">
+            <table className="w-full text-left text-sm">
+              <thead className="text-muted-foreground">
+                <tr>
+                  <th className="py-2 pr-4 font-medium">Employee</th>
+                  <th className="py-2 pr-4 font-medium">Rooms</th>
+                  <th className="py-2 pr-4 font-medium">Total time</th>
+                  <th className="py-2 pr-4 font-medium">Average</th>
+                  <th className="py-2 font-medium">Unfinished at day close</th>
+                </tr>
+              </thead>
+              <tbody>
+                {data.employeeRows.map((row) => (
+                  <tr key={row.id} className="border-t border-border">
+                    <td className="py-2 pr-4">{row.name}</td>
+                    <td className="py-2 pr-4">{row.rooms}</td>
+                    <td className="py-2 pr-4">{formatDuration(row.totalSeconds)}</td>
+                    <td className="py-2 pr-4">{row.avgMinutes}m</td>
+                    <td className="py-2">{row.unfinished}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+
+      {period === "day" && (
+        <div className="rounded-2xl border border-border bg-card p-6">
+          <h2 className="mb-1 font-semibold">Room status</h2>
+          <p className="mb-4 text-sm text-muted-foreground">
+            {data.dayIsOpen
+              ? "This is the live board. It is saved automatically at 3:00 AM hotel time."
+              : "Saved at the 3:00 AM day close."}
+          </p>
+          {data.roomRows.length === 0 ? (
+            <p className="text-sm text-muted-foreground">No room record for this day.</p>
+          ) : (
+            <div className="max-h-[32rem] overflow-auto">
+              <table className="w-full text-left text-sm">
+                <thead className="text-muted-foreground">
+                  <tr>
+                    <th className="py-2 pr-4 font-medium">Room</th>
+                    <th className="py-2 pr-4 font-medium">Status</th>
+                    <th className="py-2 pr-4 font-medium">Guest</th>
+                    <th className="py-2 pr-4 font-medium">Housekeeper</th>
+                    <th className="py-2 font-medium">Notes</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {data.roomRows.map((row) => (
+                    <tr key={`${row.date}-${row.roomNumber}`} className="border-t border-border">
+                      <td className="py-2 pr-4 font-medium">{row.roomNumber}</td>
+                      <td className="py-2 pr-4">
+                        {statusLabel(row.status)}
+                        {row.doNotDisturb ? " · DND" : ""}
+                      </td>
+                      <td className="py-2 pr-4">{guestLabel(row.guestStatus)}</td>
+                      <td className="py-2 pr-4">{row.housekeeperName || "—"}</td>
+                      <td className="py-2 text-muted-foreground">{row.notes || "—"}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
 
       <div className="grid gap-6 lg:grid-cols-2">
         <div className="rounded-2xl border border-border bg-card p-6">
-          <h2 className="mb-4 font-semibold">Guest Requests</h2>
+          <h2 className="mb-4 font-semibold">Guest requests</h2>
           <div className="space-y-2 text-sm">
             <div className="flex justify-between">
               <span>Open</span>
@@ -115,30 +230,9 @@ export default async function ReportsPage({
               <span className="font-medium">{data.guestRequests.completed}</span>
             </div>
           </div>
-          <div className="mt-4 space-y-1">
-            {data.guestRequests.byType.map((t) => (
-              <div key={t.type} className="flex justify-between text-sm text-muted-foreground">
-                <span>{t.type}</span>
-                <span>{t.count}</span>
-              </div>
-            ))}
-          </div>
         </div>
-
         <div className="rounded-2xl border border-border bg-card p-6">
-          <h2 className="mb-4 font-semibold">Inventory Snapshot</h2>
-          <div className="max-h-64 space-y-1 overflow-auto">
-            {data.inventoryUsage.map((i) => (
-              <div key={i.category} className="flex justify-between text-sm">
-                <span>{i.category}</span>
-                <span className="font-medium">{i.quantity}</span>
-              </div>
-            ))}
-          </div>
-        </div>
-
-        <div className="rounded-2xl border border-border bg-card p-6">
-          <h2 className="mb-4 font-semibold">Lost & Found</h2>
+          <h2 className="mb-4 font-semibold">Lost & found</h2>
           <div className="space-y-2 text-sm">
             <div className="flex justify-between">
               <span>Stored</span>
@@ -154,18 +248,34 @@ export default async function ReportsPage({
             </div>
           </div>
         </div>
-
         <div className="rounded-2xl border border-border bg-card p-6">
-          <h2 className="mb-4 font-semibold">Laundry Status</h2>
+          <h2 className="mb-4 font-semibold">Maintenance</h2>
+          <div className="space-y-2 text-sm">
+            <div className="flex justify-between">
+              <span>Open</span>
+              <span className="font-medium">{data.maintenance.open}</span>
+            </div>
+            <div className="flex justify-between">
+              <span>Completed</span>
+              <span className="font-medium">{data.maintenance.completed}</span>
+            </div>
+          </div>
+        </div>
+        <div className="rounded-2xl border border-border bg-card p-6">
+          <h2 className="mb-4 font-semibold">Laundry</h2>
           <div className="space-y-1">
-            {data.laundry.map((b, i) => (
-              <div key={`${b.itemType}-${i}`} className="flex justify-between text-sm">
-                <span>{b.itemType}</span>
-                <span className="text-muted-foreground">
-                  {b.status} · {b.quantity}
-                </span>
-              </div>
-            ))}
+            {data.laundry.length === 0 ? (
+              <p className="text-sm text-muted-foreground">No laundry updated in this period.</p>
+            ) : (
+              data.laundry.map((batch, index) => (
+                <div key={`${batch.itemType}-${index}`} className="flex justify-between text-sm">
+                  <span>{batch.itemType}</span>
+                  <span className="text-muted-foreground">
+                    {batch.status} · {batch.quantity}
+                  </span>
+                </div>
+              ))
+            )}
           </div>
         </div>
       </div>

@@ -5,6 +5,7 @@ import { guestStayLabel, ROOM_STATUS_CONFIG } from "@/lib/utils";
 import { MobileRoomActions } from "@/components/mobile-room-actions";
 import { CleaningTimer } from "@/components/cleaning-timer";
 import { RoomCacheHydrator } from "@/components/room-cache-hydrator";
+import { RoomStayCue } from "@/components/room-stay-cue";
 
 export default async function MobileHousekeepingPage() {
   const session = await requireAuth();
@@ -45,13 +46,23 @@ export default async function MobileHousekeepingPage() {
           return (
             <div key={room.id} className="rounded-2xl border border-border bg-card p-4 shadow-sm">
               <div className="mb-3 flex items-center justify-between">
-                <Link href={`/m/rooms/${room.id}`} className="flex items-baseline gap-2 text-2xl font-bold">
-                  {room.number}
-                  <CleaningTimer
-                    startedAt={room.cleaningStartedAt}
-                    active={room.status === "CLEANING"}
+                <div className="flex flex-wrap items-baseline gap-2">
+                  <Link href={`/m/rooms/${room.id}`} className="flex items-baseline gap-2 text-2xl font-bold">
+                    {room.number}
+                    <CleaningTimer
+                      startedAt={room.cleaningStartedAt}
+                      active={room.status === "CLEANING"}
+                    />
+                  </Link>
+                  <RoomStayCue
+                    roomId={room.id}
+                    guestStatus={room.guestStatus}
+                    arrivalDate={room.arrivalDate}
+                    departureDate={room.departureDate}
+                    notes={room.frontDeskNotes}
+                    doNotDisturb={room.doNotDisturb}
                   />
-                </Link>
+                </div>
                 <span className={`rounded-full px-2 py-1 text-xs ${cfg.bg} ${cfg.text}`}>
                   HK: {cfg.label}
                 </span>

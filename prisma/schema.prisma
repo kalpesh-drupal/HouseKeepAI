@@ -47,6 +47,13 @@ enum CleaningStatus {
   INSPECTION_FAILED
 }
 
+enum CleaningOutcome {
+  CLEAN
+  READY_TO_INSPECT
+  UNFINISHED
+  RESTARTED
+}
+
 enum TicketPriority {
   LOW
   MEDIUM
@@ -125,6 +132,10 @@ model Hotel {
   floors    Int      @default(3)
   /// PMS whose housekeeping report this hotel uploads (SkyTouch, Choice Advantage, …).
   reportPms String?
+  /// IANA timezone used to close the hotel day at 3:00 AM.
+  timezone     String    @default("America/Chicago")
+  /// Business date currently open. The previous day is saved at 3:00 AM.
+  businessDate DateTime?
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -138,6 +149,8 @@ model Hotel {
   lostFoundItems     LostFoundItem[]
   pmsConnections     PmsConnection[]
   pmsSyncLogs        PmsSyncLog[]
+  roomDaySnapshots   RoomDaySnapshot[]
+  cleaningSessions   CleaningSession[]
 }
 
 model User {
@@ -160,6 +173,7 @@ model User {
   receivedMessages   Message[]           @relation("ReceivedMessages")
   foundItems         LostFoundItem[]     @relation("FoundBy")
   assignedRequests   GuestRequest[]      @relation("AssignedRequests")
+  cleaningSessions   CleaningSession[]   @relation("CleaningSessions")
   pushSubscriptions  PushSubscription[]
   passwordResetRequests PasswordResetRequest[]
 }
@@ -185,6 +199,7 @@ model Room {
   cleaningStatus  CleaningStatus @default(NOT_STARTED)
   isVip           Boolean        @default(false)
   isRush          Boolean        @default(false)
+  doNotDisturb    Boolean        @default(false)
   guestName       String?
   arrivalDate     DateTime?
   departureDate   DateTime?
@@ -208,6 +223,8 @@ model Room {
   maintenanceTickets MaintenanceTicket[]
   guestRequests      GuestRequest[]
   photos             RoomPhoto[]
+  daySnapshots       RoomDaySnapshot[]
+  cleaningSessions   CleaningSession[]
 
   @@unique([hotelId, number])
 }
@@ -391,6 +408,57 @@ model PmsSyncLog {
   createdAt DateTime      @default(now())
 
   hotel Hotel @relation(fields: [hotelId], references: [id], onDelete: Cascade)
+}
+
+/// End-of-day copy of each room, written at 3:00 AM hotel time.
+model RoomDaySnapshot {
+  id              String          @id @default(cuid())
+  hotelId         String
+  roomId          String
+  roomNumber      String
+  businessDate    DateTime
+  status          RoomStatus
+  guestStatus     GuestStayStatus
+  cleaningStatus  CleaningStatus
+  housekeeperId   String?
+  housekeeperName String?
+  doNotDisturb    Boolean         @default(false)
+  isRush          Boolean         @default(false)
+  isVip           Boolean         @default(false)
+  arrivalDate     DateTime?
+  departureDate   DateTime?
+  frontDeskNotes  String?
+  createdAt       DateTime        @default(now())
+
+  hotel Hotel @relation(fields: [hotelId], references: [id], onDelete: Cascade)
+  room  Room  @relation(fields: [roomId], references: [id], onDelete: Cascade)
+
+  @@unique([roomId, businessDate])
+  @@index([hotelId, businessDate])
+}
+
+/// One housekeeper clean, from start to finish, kept for day, month, and year reports.
+model CleaningSession {
+  id              String            @id @default(cuid())
+  hotelId         String
+  roomId          String
+  roomNumber      String
+  housekeeperId   String?
+  housekeeperName String?
+  businessDate    DateTime
+  startedAt       DateTime
+  finishedAt      DateTime?
+  durationSeconds Int?
+  outcome         CleaningOutcome?
+  createdAt       DateTime          @default(now())
+
+  hotel       Hotel @relation(fields: [hotelId], references: [id], onDelete: Cascade)
+  room        Room  @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  housekeeper User? @relation("CleaningSessions", fields: [housekeeperId], references: [id], onDelete: SetNull)
+
+  @@index([hotelId, businessDate])
+  @@index([hotelId, housekeeperId, businessDate])
+  @@index([roomId, finishedAt])
 }
 
 model PushSubscription {

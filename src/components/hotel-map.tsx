@@ -15,8 +15,10 @@ type Room = {
   status: RoomStatus;
   isVip: boolean;
   isRush: boolean;
-  arrivalDate: Date | null;
-  departureDate: Date | null;
+  arrivalDate: Date | string | null;
+  departureDate: Date | string | null;
+  guestStatus?: string | null;
+  doNotDisturb?: boolean;
   housekeeperName?: string | null;
 };
 
@@ -429,6 +431,10 @@ export function HotelMap({
                       isRush={room.isRush}
                       type={room.type}
                       assignee={room.housekeeperName}
+                      guestStatus={room.guestStatus}
+                      arrivalDate={room.arrivalDate}
+                      departureDate={room.departureDate}
+                      doNotDisturb={room.doNotDisturb}
                     />
                   )
                 )}

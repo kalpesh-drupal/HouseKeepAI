@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { runDuePmsSyncs } from "@/lib/pms/sync";
+import { rollAllHotels } from "@/lib/day-roll";
 
 /**
  * Scheduled PMS sync endpoint.
@@ -16,10 +17,19 @@ export async function GET(req: NextRequest) {
   }
 
   const results = await runDuePmsSyncs();
+  let dayRoll: unknown = null;
+  let dayRollError: string | null = null;
+  try {
+    dayRoll = await rollAllHotels();
+  } catch (error) {
+    dayRollError = error instanceof Error ? error.message : "Day roll failed";
+  }
   return NextResponse.json({
     ok: true,
     ranAt: new Date().toISOString(),
     results,
+    dayRoll,
+    dayRollError,
   });
 }
 
