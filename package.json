@@ -19,6 +19,8 @@
     "db:down": "docker compose down",
     "health": "curl -s http://localhost:3006/api/health",
     "pms:cron": "curl -s -H \"Authorization: Bearer $CRON_SECRET\" http://localhost:3006/api/pms/cron",
+    "pms:cron:loop": "tsx scripts/pms-cron-worker.ts",
+    "dev:with-cron": "npm run pms:cron:loop & npm run dev",
     "postinstall": "prisma generate"
   },
   "dependencies": {
@@ -29,6 +31,7 @@
     "lucide-react": "^0.511.0",
     "next": "^15.3.3",
     "next-auth": "^4.24.11",
+    "playwright": "^1.64.1",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
     "recharts": "^2.15.3",

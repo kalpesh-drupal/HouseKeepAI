@@ -71,8 +71,23 @@ export default async function PmsPage() {
 
       <PmsPanel
         connections={connections.map((c) => ({
-          ...c,
+          id: c.id,
+          provider: c.provider,
+          propertyId: c.propertyId,
+          apiKey: null,
+          apiSecret: null,
+          baseUrl: c.baseUrl,
+          enabled: c.enabled,
           lastSyncAt: c.lastSyncAt?.toISOString() ?? null,
+          syncIntervalMinutes: c.syncIntervalMinutes,
+          conflictPolicy: c.conflictPolicy,
+          portalEnabled: c.portalEnabled,
+          portalLoginUrl: c.portalLoginUrl,
+          portalUsername: c.portalUsername,
+          portalSelectors: c.portalSelectors,
+          hasPortalPassword: Boolean(c.portalPasswordEnc),
+          hasApiKey: Boolean(c.apiKey),
+          hasApiSecret: Boolean(c.apiSecret),
         }))}
         logs={logs.map((l) => ({
           ...l,

@@ -45,3 +45,7 @@ prisma/*.db-journal
 
 # uploads
 /public/uploads
+
+.tmp/
+.tmp-skytouch-dump/
+.tmp-skytouch-home/

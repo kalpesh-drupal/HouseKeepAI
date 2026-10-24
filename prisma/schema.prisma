@@ -126,6 +126,20 @@ enum PmsSyncStatus {
   FAILED
 }
 
+enum PmsWriteJobStatus {
+  PENDING
+  RUNNING
+  SUCCESS
+  FAILED
+}
+
+/// SkyTouch Housekeeping Center condition to set on write-back.
+enum PmsBoardCondition {
+  READY
+  CLEAN
+  DIRTY
+}
+
 model Hotel {
   id        String   @id @default(cuid())
   name      String
@@ -149,6 +163,8 @@ model Hotel {
   lostFoundItems     LostFoundItem[]
   pmsConnections     PmsConnection[]
   pmsSyncLogs        PmsSyncLog[]
+  pmsFlashSnapshots  PmsFlashSnapshot[]
+  pmsWriteJobs       PmsWriteJob[]
   roomDaySnapshots   RoomDaySnapshot[]
   cleaningSessions   CleaningSession[]
 }
@@ -386,9 +402,19 @@ model PmsConnection {
   apiSecret            String?
   baseUrl              String?
   enabled              Boolean     @default(false)
-  syncIntervalMinutes  Int         @default(15)
+  syncIntervalMinutes  Int         @default(10)
   conflictPolicy       String      @default("PMS_RESERVATIONS_ONLY")
   lastSyncAt           DateTime?
+  /// Secure portal login (no API). Password is AES-GCM encrypted at rest.
+  portalEnabled        Boolean     @default(false)
+  portalLoginUrl       String?
+  portalUsername       String?
+  portalPasswordEnc    String?
+  /// Optional JSON overrides for login / report download selectors.
+  portalSelectors      String?
+  /// Latest SkyTouch Welcome/Home flash stats (occupancy, ADR, arrivals, etc.).
+  portalFlashJson      String?
+  portalFlashAt        DateTime?
   createdAt            DateTime    @default(now())
   updatedAt            DateTime    @updatedAt
 
@@ -408,6 +434,55 @@ model PmsSyncLog {
   createdAt DateTime      @default(now())
 
   hotel Hotel @relation(fields: [hotelId], references: [id], onDelete: Cascade)
+}
+
+/// Queue of SkyTouch Housekeeping Center write-backs (clean / ready / dirty).
+model PmsWriteJob {
+  id              String            @id @default(cuid())
+  hotelId         String
+  provider        PmsProvider       @default(SKYTOUCH)
+  roomId          String?
+  roomNumber      String
+  condition       PmsBoardCondition
+  status          PmsWriteJobStatus @default(PENDING)
+  attempts        Int               @default(0)
+  lastError       String?
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
+  completedAt     DateTime?
+
+  hotel Hotel @relation(fields: [hotelId], references: [id], onDelete: Cascade)
+
+  @@index([hotelId, status, createdAt])
+  @@index([status, createdAt])
+}
+
+/// One row per SkyTouch (or other PMS) Home/Welcome flash collect.
+model PmsFlashSnapshot {
+  id                    String      @id @default(cuid())
+  hotelId               String
+  provider              PmsProvider
+  collectedAt           DateTime
+  sourceUrl             String?
+  occupancyPercent      Float?
+  expectedAdr           Float?
+  totalArrivals         Int?
+  checkInsCompleted     Int?
+  checkInsRemaining     Int?
+  totalDepartures       Int?
+  vacantDirtyRemaining  Int?
+  totalRoomsAvailable   Int?
+  checkIns              Int?
+  stayovers             Int?
+  vacant                Int?
+  ooo                   Int?
+  available             Int?
+  createdAt             DateTime    @default(now())
+
+  hotel Hotel @relation(fields: [hotelId], references: [id], onDelete: Cascade)
+
+  @@index([hotelId, collectedAt])
+  @@index([hotelId, provider, collectedAt])
 }
 
 /// End-of-day copy of each room, written at 3:00 AM hotel time.

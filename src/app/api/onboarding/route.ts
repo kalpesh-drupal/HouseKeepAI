@@ -112,14 +112,14 @@ export async function POST(req: NextRequest) {
         provider: "SKYTOUCH",
         enabled: false,
         conflictPolicy: "PMS_RESERVATIONS_ONLY",
-        syncIntervalMinutes: 15,
+        syncIntervalMinutes: 10,
       },
       {
         hotelId: hotel.id,
         provider: "SYNXIS",
         enabled: false,
         conflictPolicy: "PMS_RESERVATIONS_ONLY",
-        syncIntervalMinutes: 15,
+        syncIntervalMinutes: 10,
       },
     ],
   });

@@ -7,7 +7,7 @@ process.env.PORT = process.env.PORT || String(APP_PORT);
 
 const nextConfig: NextConfig = {
   outputFileTracingRoot: path.join(__dirname),
-  serverExternalPackages: ["unpdf"],
+  serverExternalPackages: ["unpdf", "playwright"],
   images: {
     remotePatterns: [
       {

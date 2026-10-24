@@ -161,24 +161,70 @@ export async function runPmsSync(hotelId: string, provider: PmsProvider) {
   return { updated, skipped, log, payload, policy };
 }
 
-/** Sync all enabled connectors that are due based on syncIntervalMinutes. */
+/** Sync all enabled API or portal connectors that are due based on syncIntervalMinutes. */
 export async function runDuePmsSyncs() {
-  const connections = await prisma.pmsConnection.findMany({ where: { enabled: true } });
+  const connections = await prisma.pmsConnection.findMany({
+    where: { OR: [{ enabled: true }, { portalEnabled: true }] },
+  });
   const results = [];
 
+  // Always flush pending SkyTouch board write-backs first (clean / ready / dirty).
+  try {
+    const { processPendingSkyTouchWrites } = await import("@/lib/pms/portal-write");
+    const writes = await processPendingSkyTouchWrites();
+    if (writes.jobs > 0) {
+      results.push({ mode: "portal_write", ...writes });
+    }
+  } catch (err) {
+    results.push({
+      mode: "portal_write",
+      error: err instanceof Error ? err.message : "write queue failed",
+    });
+  }
+
   for (const conn of connections) {
-    const intervalMs = Math.max(1, conn.syncIntervalMinutes || 15) * 60 * 1000;
+    const intervalMs = Math.max(1, conn.syncIntervalMinutes || 10) * 60 * 1000;
     const due =
       !conn.lastSyncAt || Date.now() - conn.lastSyncAt.getTime() >= intervalMs;
     if (!due) {
       results.push({ provider: conn.provider, hotelId: conn.hotelId, skipped: true, reason: "not_due" });
       continue;
     }
+
+    if (conn.portalEnabled && conn.provider === "SKYTOUCH") {
+      try {
+        const { runPortalCollect } = await import("@/lib/pms/portal-collect");
+        const result = await runPortalCollect(conn.hotelId, conn.provider);
+        results.push({
+          provider: conn.provider,
+          hotelId: conn.hotelId,
+          mode: "portal",
+          updated: result.imported.updated,
+          created: result.imported.created,
+          skipped: result.imported.skipped,
+        });
+      } catch (err) {
+        results.push({
+          provider: conn.provider,
+          hotelId: conn.hotelId,
+          mode: "portal",
+          error: err instanceof Error ? err.message : "failed",
+        });
+      }
+      continue;
+    }
+
+    if (!conn.enabled) {
+      results.push({ provider: conn.provider, hotelId: conn.hotelId, skipped: true, reason: "api_disabled" });
+      continue;
+    }
+
     try {
       const result = await runPmsSync(conn.hotelId, conn.provider);
       results.push({
         provider: conn.provider,
         hotelId: conn.hotelId,
+        mode: "api",
         updated: result.updated,
         skipped: result.skipped,
       });
@@ -195,6 +241,7 @@ export async function runDuePmsSyncs() {
       results.push({
         provider: conn.provider,
         hotelId: conn.hotelId,
+        mode: "api",
         error: err instanceof Error ? err.message : "failed",
       });
     }

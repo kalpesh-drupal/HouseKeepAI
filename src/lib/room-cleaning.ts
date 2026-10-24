@@ -3,6 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { INSPECTION_CHECKLIST_ITEMS } from "@/lib/utils";
 import { resetRoomChecklist } from "@/lib/room-inventory";
 import { finishCleaningSession } from "@/lib/cleaning-log";
+import { enqueueSkyTouchBoardWrite, schedulePortalWriteProcessing } from "@/lib/pms/portal-write";
 
 type RoomWork = {
   id: string;
@@ -87,6 +88,14 @@ export async function markRoomClean(room: RoomWork, actorId: string, actorIsStaf
       housekeeperId: claimingFinish ? claimHousekeeper(room, actorId, actorIsStaff) : room.housekeeperId,
     },
   });
+  // Only Mark Clean writes to SkyTouch (Ready). Ready-to-inspect stays in HouseKeepAI for the head HK.
+  await enqueueSkyTouchBoardWrite({
+    hotelId: room.hotelId,
+    roomId: room.id,
+    roomNumber: room.number,
+    kind: "clean",
+  });
+  schedulePortalWriteProcessing(room.hotelId);
 }
 
 export async function markRoomReadyToInspect(room: RoomWork, actorId: string, actorIsStaff: boolean) {
@@ -129,6 +138,7 @@ export async function markRoomReadyToInspect(room: RoomWork, actorId: string, ac
       housekeeperId: claimHousekeeper(room, actorId, actorIsStaff),
     },
   });
+  // Ready to inspect is HouseKeepAI-only (for head housekeeper inspection). No SkyTouch write.
 }
 
 export async function sendRoomBackDirty(room: RoomWork) {
@@ -143,4 +153,5 @@ export async function sendRoomBackDirty(room: RoomWork) {
     },
   });
   await resetRoomChecklist(room.id);
+  // Send-back stays in HouseKeepAI only — SkyTouch updates only on Mark Clean.
 }

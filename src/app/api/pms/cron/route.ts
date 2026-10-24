@@ -3,9 +3,12 @@ import { runDuePmsSyncs } from "@/lib/pms/sync";
 import { rollAllHotels } from "@/lib/day-roll";
 
 /**
- * Scheduled PMS sync endpoint.
- * Call every 5 minutes from cron / Vercel Cron / system cron:
+ * Scheduled PMS sync / SkyTouch portal collect endpoint.
+ * Intended every 10 minutes (see vercel.json + `npm run pms:cron:loop`):
  *   curl -H "Authorization: Bearer $CRON_SECRET" http://localhost:3006/api/pms/cron
+ *
+ * Note: SkyTouch portal collect uses Playwright. Prefer a long-running host
+ * (`npm run pms:cron:loop` next to `npm run dev`) — Vercel serverless may time out.
  */
 export async function GET(req: NextRequest) {
   const secret = process.env.CRON_SECRET;

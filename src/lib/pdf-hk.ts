@@ -134,12 +134,108 @@ function slashDate(token: string) {
   return `${year}-${String(Number(match[1])).padStart(2, "0")}-${String(Number(match[2])).padStart(2, "0")}`;
 }
 
+function pushCheckOffRow(
+  rows: string[][],
+  input: {
+    room: string;
+    type: string;
+    occupancyCode: string;
+    condition: string;
+    tail?: string;
+  }
+) {
+  let tail = (input.tail || "").trim();
+  let stay = "";
+  if (/^stay\b/i.test(tail)) {
+    stay = "Stayover";
+    tail = tail.replace(/^stay\s*/i, "");
+  } else if (/^c\/o\b/i.test(tail)) {
+    stay = input.occupancyCode.toUpperCase() === "OCC" ? "Departing" : "Checked Out";
+    tail = tail.replace(/^c\/o\s*/i, "");
+  } else if (/\bstay(?:over)?\b/i.test(tail)) {
+    stay = "Stayover";
+  } else if (/\bc\/o\b|\bcheck(?:ed)?\s*out\b/i.test(tail)) {
+    stay = input.occupancyCode.toUpperCase() === "OCC" ? "Departing" : "Checked Out";
+  }
+  if (/^full\b/i.test(tail)) tail = tail.replace(/^full\s*/i, "");
+
+  const dateTokens = [...tail.matchAll(/\b\d{1,2}\/\d{1,2}\/\d{2,4}\b/g)].map((match) => match[0]);
+  const beforeDates = tail.split(/\d{1,2}\/\d{1,2}\/\d{2,4}/)[0].trim();
+  const attendant = beforeDates.match(/^([A-Z])\s+(.+)$/);
+  let housekeeper = "";
+  let notes = "";
+  if (attendant) {
+    if (/^inspection$/i.test(attendant[2])) notes = "Inspection";
+    else housekeeper = attendant[2];
+  } else if (beforeDates && !/^(stay|c\/o|full)$/i.test(beforeDates)) {
+    notes = beforeDates;
+  }
+
+  const dates = dateTokens.map(slashDate).filter(Boolean);
+  const checkIn = dates.length >= 2 ? dates[0] : dates[0] || "";
+  const checkOut = dates.length >= 2 ? dates[1] : "";
+  const afterDates = tail
+    .split(/\d{1,2}\/\d{1,2}\/\d{2,4}/)
+    .slice(1)
+    .join(" ")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (afterDates) notes = [notes, afterDates].filter(Boolean).join(" · ");
+  const occupancy = input.occupancyCode.toUpperCase() === "OCC" ? "Occupied" : "Vacant";
+  const guest = stay || (occupancy === "Occupied" ? "Occupied" : "Vacant");
+  const condition = /^dirty$/i.test(input.condition) ? "Dirty" : "Ready";
+
+  rows.push([
+    input.room,
+    input.type || "STD",
+    condition,
+    occupancy,
+    guest,
+    housekeeper,
+    checkIn,
+    checkOut,
+    csvEscape(notes),
+  ]);
+}
+
+function parseCheckOffTableLine(line: string, rows: string[][]) {
+  const cells = line
+    .split(/\t|\s{2,}/)
+    .map((cell) => cell.trim())
+    .filter(Boolean);
+  if (cells.length < 3) return false;
+  if (!/^\d{3,4}$/.test(cells[0])) return false;
+  if (/^room$/i.test(cells[0])) return false;
+
+  const occupancy = cells.find((cell) => /^(VAC|OCC)$/i.test(cell));
+  const condition = cells.find((cell) => /^(Dirty|Ready|Clean)$/i.test(cell));
+  if (!occupancy || !condition) return false;
+
+  const type = cells[1] && !/^\d+$/.test(cells[1]) && !/^(VAC|OCC)$/i.test(cells[1]) ? cells[1] : "STD";
+  const occIndex = cells.findIndex((cell) => /^(VAC|OCC)$/i.test(cell));
+  const condIndex = cells.findIndex((cell) => /^(Dirty|Ready|Clean)$/i.test(cell));
+  const tailStart = Math.max(occIndex, condIndex) + 1;
+  const tail = cells.slice(tailStart).join(" ");
+  pushCheckOffRow(rows, {
+    room: cells[0],
+    type,
+    occupancyCode: occupancy,
+    condition,
+    tail,
+  });
+  return true;
+}
+
 /**
  * SkyTouch and Choice Advantage "Housekeeping Check-Off List".
  * Room, Type, People, Status (VAC/OCC), Condition (Dirty/Ready), Stay/C/O, housekeeper, arrival, departure.
+ * Also accepts on-screen HTML table text (tab / multi-space separated).
  */
 export function housekeepingCheckOffToCsv(raw: string): string | null {
-  if (!/housekeeping check-off list/i.test(raw)) return null;
+  const looksLikeCheckOff =
+    /housekeeping check-off list/i.test(raw) ||
+    (/\b(VAC|OCC)\b/i.test(raw) && /\b(Dirty|Ready|Clean)\b/i.test(raw) && /\b\d{3,4}\b/.test(raw));
+  if (!looksLikeCheckOff) return null;
 
   const lines = raw
     .split(/\r?\n/)
@@ -152,55 +248,17 @@ export function housekeepingCheckOffToCsv(raw: string): string | null {
   const flush = () => {
     if (!pending?.rest) return;
     const status = pending.rest.match(CHECKOFF_STATUS);
-    if (!status) return;
-    let tail = (status[5] || "").trim();
-    let stay = "";
-    if (/^stay\b/i.test(tail)) {
-      stay = "Stayover";
-      tail = tail.replace(/^stay\s*/i, "");
-    } else if (/^c\/o\b/i.test(tail)) {
-      stay = status[3].toUpperCase() === "OCC" ? "Departing" : "Checked Out";
-      tail = tail.replace(/^c\/o\s*/i, "");
+    if (!status) {
+      pending = null;
+      return;
     }
-    if (/^full\b/i.test(tail)) tail = tail.replace(/^full\s*/i, "");
-
-    const dateTokens = [...tail.matchAll(/\b\d{1,2}\/\d{1,2}\/\d{2,4}\b/g)].map((match) => match[0]);
-    const beforeDates = tail.split(/\d{1,2}\/\d{1,2}\/\d{2,4}/)[0].trim();
-    const attendant = beforeDates.match(/^([A-Z])\s+(.+)$/);
-    let housekeeper = "";
-    let notes = "";
-    if (attendant) {
-      if (/^inspection$/i.test(attendant[2])) notes = "Inspection";
-      else housekeeper = attendant[2];
-    } else if (beforeDates) {
-      notes = beforeDates;
-    }
-
-    const dates = dateTokens.map(slashDate).filter(Boolean);
-    const checkIn = dates.length >= 2 ? dates[0] : "";
-    const checkOut = dates.length >= 2 ? dates[1] : "";
-    const afterDates = tail
-      .split(/\d{1,2}\/\d{1,2}\/\d{2,4}/)
-      .slice(1)
-      .join(" ")
-      .replace(/\s+/g, " ")
-      .trim();
-    if (afterDates) notes = [notes, afterDates].filter(Boolean).join(" · ");
-    const occupancy = status[3].toUpperCase() === "OCC" ? "Occupied" : "Vacant";
-    const guest = stay || (occupancy === "Occupied" ? "Occupied" : "Vacant");
-    const condition = /^dirty$/i.test(status[4]) ? "Dirty" : "Ready";
-
-    rows.push([
-      pending.room,
-      pending.type,
-      condition,
-      occupancy,
-      guest,
-      housekeeper,
-      checkIn,
-      checkOut,
-      csvEscape(notes),
-    ]);
+    pushCheckOffRow(rows, {
+      room: pending.room,
+      type: pending.type,
+      occupancyCode: status[3],
+      condition: status[4],
+      tail: status[5] || "",
+    });
     pending = null;
   };
 
@@ -210,6 +268,27 @@ export function housekeepingCheckOffToCsv(raw: string): string | null {
       /^(room|type|people|status|condition|stay\/c\/o|service|housekeeper|update|notes|special|requests|arrival|departure|last clean)$/i.test(line) ||
       /^page\s+\d+\s+of\s+\d+/i.test(line)
     ) {
+      continue;
+    }
+
+    if (parseCheckOffTableLine(line, rows)) {
+      pending = null;
+      continue;
+    }
+
+    // One-line room rows from the on-screen report window.
+    const oneLine = line.match(
+      /^(\d{3,4})\s+([A-Za-z][A-Za-z0-9/-]*)\s+(?:(\d+)\s+)?(VAC|OCC)\s+(Dirty|Ready|Clean)(?:\s+(.*))?$/i
+    );
+    if (oneLine) {
+      pending = null;
+      pushCheckOffRow(rows, {
+        room: oneLine[1],
+        type: oneLine[2],
+        occupancyCode: oneLine[4],
+        condition: oneLine[5],
+        tail: oneLine[6] || "",
+      });
       continue;
     }
 
@@ -232,7 +311,7 @@ export function housekeepingCheckOffToCsv(raw: string): string | null {
   }
   flush();
 
-  if (rows.length < 5) return null;
+  if (!rows.length) return null;
   return [
     "Room,Room Type,Housekeeping Status,Occupancy Status,Guest Status,Housekeeper,Check-In,Check-Out,Notes",
     ...rows.map((row) => row.join(",")),

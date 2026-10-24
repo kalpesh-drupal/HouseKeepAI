@@ -9,6 +9,7 @@ import {
   periodInstantRange,
   type ReportPeriod,
 } from "@/lib/business-day";
+import { flashStatsFromSnapshot, parseFlashStatsJson } from "@/lib/pms/flash-stats";
 
 export async function getDashboardStats(hotelId: string) {
   const today = new Date();
@@ -16,7 +17,21 @@ export async function getDashboardStats(hotelId: string) {
   const tomorrow = new Date(today);
   tomorrow.setDate(tomorrow.getDate() + 1);
 
-  const rooms = await prisma.room.findMany({ where: { hotelId } });
+  const [rooms, flashRow, portalConn] = await Promise.all([
+    prisma.room.findMany({ where: { hotelId } }),
+    prisma.pmsFlashSnapshot.findFirst({
+      where: { hotelId },
+      orderBy: { collectedAt: "desc" },
+    }),
+    prisma.pmsConnection.findFirst({
+      where: { hotelId, portalFlashJson: { not: null } },
+      orderBy: { portalFlashAt: "desc" },
+      select: { portalFlashJson: true, portalFlashAt: true, provider: true },
+    }),
+  ]);
+  const pmsFlash = flashRow
+    ? flashStatsFromSnapshot(flashRow)
+    : parseFlashStatsJson(portalConn?.portalFlashJson);
   const totalRooms = rooms.length;
   const occupied = rooms.filter(
     (r) =>
@@ -87,6 +102,9 @@ export async function getDashboardStats(hotelId: string) {
     rushRooms,
     vipRooms,
     guestRequests,
+    pmsFlash,
+    pmsFlashAt: flashRow?.collectedAt ?? portalConn?.portalFlashAt ?? null,
+    pmsFlashProvider: flashRow?.provider ?? portalConn?.provider ?? null,
     charts: {
       cleaningProgress: [
         { name: "Dirty", value: vacantDirty, color: "#ef4444" },

@@ -4,6 +4,35 @@ import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { PmsProvider } from "@prisma/client";
 import { runPmsSync } from "@/lib/pms/sync";
+import { encryptSecret } from "@/lib/crypto-secret";
+import { runPortalCollect } from "@/lib/pms/portal-collect";
+import { normalizeSkyTouchLoginUrl } from "@/lib/pms/skytouch-portal";
+
+const VALID_PROVIDERS: PmsProvider[] = [
+  "SKYTOUCH",
+  "SYNXIS",
+  "OPERA",
+  "CLOUDBEDS",
+  "MEWS",
+  "STAYNTOUCH",
+  "AUTOCLERK",
+  "LITTLE_HOTELIER",
+];
+
+function publicConnection<T extends { portalPasswordEnc: string | null; apiKey: string | null; apiSecret: string | null }>(
+  connection: T
+) {
+  const { portalPasswordEnc, apiKey, apiSecret, ...rest } = connection;
+  return {
+    ...rest,
+    hasPortalPassword: Boolean(portalPasswordEnc),
+    hasApiKey: Boolean(apiKey),
+    hasApiSecret: Boolean(apiSecret),
+    // Keep empty placeholders so existing forms still bind; never return secrets.
+    apiKey: "",
+    apiSecret: "",
+  };
+}
 
 export async function GET() {
   const session = await getServerSession(authOptions);
@@ -18,7 +47,10 @@ export async function GET() {
     }),
   ]);
 
-  return NextResponse.json({ connections, logs });
+  return NextResponse.json({
+    connections: connections.map(publicConnection),
+    logs,
+  });
 }
 
 export async function POST(req: NextRequest) {
@@ -31,45 +63,101 @@ export async function POST(req: NextRequest) {
 
   const body = await req.json();
   const provider = body.provider as PmsProvider;
-  const validProviders: PmsProvider[] = [
-    "SKYTOUCH",
-    "SYNXIS",
-    "OPERA",
-    "CLOUDBEDS",
-    "MEWS",
-    "STAYNTOUCH",
-    "AUTOCLERK",
-    "LITTLE_HOTELIER",
-  ];
-  if (!validProviders.includes(provider)) {
+  if (!VALID_PROVIDERS.includes(provider)) {
     return NextResponse.json({ error: "Invalid provider" }, { status: 400 });
   }
 
   if (body.action === "save") {
-    const connection = await prisma.pmsConnection.upsert({
-      where: { hotelId_provider: { hotelId: session.user.hotelId, provider } },
-      create: {
-        hotelId: session.user.hotelId,
-        provider,
-        propertyId: body.propertyId || null,
-        apiKey: body.apiKey || null,
-        apiSecret: body.apiSecret || null,
-        baseUrl: body.baseUrl || null,
-        enabled: Boolean(body.enabled),
-        syncIntervalMinutes: Number(body.syncIntervalMinutes) || 15,
-        conflictPolicy: body.conflictPolicy || "PMS_RESERVATIONS_ONLY",
-      },
-      update: {
-        propertyId: body.propertyId || null,
-        apiKey: body.apiKey || null,
-        apiSecret: body.apiSecret || null,
-        baseUrl: body.baseUrl || null,
-        enabled: Boolean(body.enabled),
-        syncIntervalMinutes: Number(body.syncIntervalMinutes) || 15,
-        conflictPolicy: body.conflictPolicy || "PMS_RESERVATIONS_ONLY",
-      },
-    });
-    return NextResponse.json({ success: true, connection });
+    try {
+      const existing = await prisma.pmsConnection.findUnique({
+        where: { hotelId_provider: { hotelId: session.user.hotelId, provider } },
+      });
+
+      const portalPasswordRaw = typeof body.portalPassword === "string" ? body.portalPassword : "";
+      let portalPasswordEnc = existing?.portalPasswordEnc ?? null;
+      if (portalPasswordRaw.trim()) {
+        portalPasswordEnc = encryptSecret(portalPasswordRaw);
+      }
+      if (body.clearPortalPassword) {
+        portalPasswordEnc = null;
+      }
+
+      let portalLoginUrl = typeof body.portalLoginUrl === "string" ? body.portalLoginUrl.trim() : "";
+      if (provider === "SKYTOUCH" && portalLoginUrl) {
+        try {
+          portalLoginUrl = normalizeSkyTouchLoginUrl(portalLoginUrl);
+        } catch (err) {
+          return NextResponse.json(
+            { error: err instanceof Error ? err.message : "Invalid SkyTouch login URL" },
+            { status: 400 }
+          );
+        }
+      }
+
+      const connection = await prisma.pmsConnection.upsert({
+        where: { hotelId_provider: { hotelId: session.user.hotelId, provider } },
+        create: {
+          hotelId: session.user.hotelId,
+          provider,
+          propertyId: body.propertyId || null,
+          apiKey: body.apiKey || null,
+          apiSecret: body.apiSecret || null,
+          baseUrl: body.baseUrl || null,
+          enabled: Boolean(body.enabled),
+          syncIntervalMinutes: Number(body.syncIntervalMinutes) || 10,
+          conflictPolicy: body.conflictPolicy || "PMS_RESERVATIONS_ONLY",
+          portalEnabled: Boolean(body.portalEnabled),
+          portalLoginUrl: portalLoginUrl || null,
+          portalUsername: body.portalUsername || null,
+          portalPasswordEnc,
+          portalSelectors: body.portalSelectors || null,
+        },
+        update: {
+          propertyId: body.propertyId || null,
+          ...(typeof body.apiKey === "string" && body.apiKey.trim() ? { apiKey: body.apiKey } : {}),
+          ...(typeof body.apiSecret === "string" && body.apiSecret.trim() ? { apiSecret: body.apiSecret } : {}),
+          baseUrl: body.baseUrl || null,
+          enabled: Boolean(body.enabled),
+          syncIntervalMinutes: Number(body.syncIntervalMinutes) || 10,
+          conflictPolicy: body.conflictPolicy || "PMS_RESERVATIONS_ONLY",
+          portalEnabled: Boolean(body.portalEnabled),
+          portalLoginUrl: portalLoginUrl || null,
+          portalUsername: body.portalUsername || null,
+          portalPasswordEnc,
+          portalSelectors: body.portalSelectors || null,
+        },
+      });
+      return NextResponse.json({ success: true, connection: publicConnection(connection) });
+    } catch (err) {
+      return NextResponse.json(
+        { error: err instanceof Error ? err.message : "Could not save PMS settings" },
+        { status: 500 }
+      );
+    }
+  }
+
+  if (body.action === "portal_collect") {
+    try {
+      const result = await runPortalCollect(session.user.hotelId, provider);
+      return NextResponse.json({
+        success: true,
+        filename: result.filename,
+        updated: result.imported.updated,
+        created: result.imported.created,
+        skipped: result.imported.skipped,
+        mode: result.imported.mode,
+        preview: result.imported.preview,
+        warnings: result.imported.warnings || [],
+        statusMissing: result.imported.statusMissing,
+        flash: result.flash,
+        boardError: result.boardError || null,
+      });
+    } catch (err) {
+      return NextResponse.json(
+        { error: err instanceof Error ? err.message : "Portal collect failed" },
+        { status: 500 }
+      );
+    }
   }
 
   if (body.action === "sync") {
@@ -77,7 +165,6 @@ export async function POST(req: NextRequest) {
       where: { hotelId_provider: { hotelId: session.user.hotelId, provider } },
     });
     if (!connection) {
-      // auto-create enabled demo connection
       await prisma.pmsConnection.create({
         data: {
           hotelId: session.user.hotelId,
