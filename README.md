@@ -88,6 +88,7 @@ All accounts use password: `password123`
 - **Onboarding:** `/onboarding` creates hotel + owner + rooms
 - **PMS conflict policies:** `PMS_RESERVATIONS_ONLY` (default), `PMS_WINS`, `MANUAL_WINS`
 - **Scheduled sync:** `GET /api/pms/cron` with `Authorization: Bearer $CRON_SECRET` (Vercel cron every 10m via `vercel.json`)
+- **SkyTouch portal agent:** always-on Chromium worker (not on Vercel) — [`docs/PMS-AGENT.md`](docs/PMS-AGENT.md)
 - **Postgres option:** `docker compose up -d` then set `DATABASE_URL` and switch Prisma provider to `postgresql`
 
 ```bash

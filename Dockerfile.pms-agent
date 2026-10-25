@@ -1,0 +1,25 @@
+# SkyTouch PMS agent — always-on Chromium worker (not for Vercel).
+# Deploy as a Railway / Fly / Render worker with production DATABASE_URL.
+# Playwright version must match package-lock.json (currently 1.64.1).
+FROM mcr.microsoft.com/playwright:v1.64.1-jammy
+
+WORKDIR /app
+
+# Install with devDependencies so `prisma generate` works; set NODE_ENV after.
+ENV PLAYWRIGHT_DOCKER=1 \
+    PLAYWRIGHT_BROWSERS_PATH=/ms-playwright \
+    PMS_AGENT_TICK_MS=60000
+
+COPY package.json package-lock.json ./
+COPY prisma ./prisma
+
+RUN npm ci && npx prisma generate
+
+COPY tsconfig.json ./
+COPY scripts ./scripts
+COPY src ./src
+
+ENV NODE_ENV=production
+
+# No public HTTP — Railway/Fly should mark this as a worker (no port required).
+CMD ["npm", "run", "pms:agent:loop"]

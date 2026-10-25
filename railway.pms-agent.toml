@@ -1,0 +1,12 @@
+# Use this when creating the Railway *worker* service (not the web app).
+# In the Railway dashboard: Settings → Build → Dockerfile path = Dockerfile.pms-agent
+# Or set RAILWAY config to this file if your CLI supports --config.
+
+[build]
+builder = "DOCKERFILE"
+dockerfilePath = "Dockerfile.pms-agent"
+
+[deploy]
+restartPolicyType = "ON_FAILURE"
+restartPolicyMaxRetries = 10
+# Worker process — do not require a listening HTTP port.

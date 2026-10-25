@@ -287,8 +287,10 @@ export function PmsPanel({ connections, logs }: { connections: Connection[]; log
           Without a PMS API, HouseKeepAI logs in with this hotel&apos;s SkyTouch username and password, opens{" "}
           <strong>Housekeeping Center</strong> to read the live board, then opens the Housekeeping Check-Off List to
                       double-check room status. Passwords are encrypted at rest. Ready to inspect stays in HouseKeepAI for
-                      the head housekeeper. Only <strong>Mark Clean</strong> (housekeeper or head HK) immediately sets the
-                      room to Ready on the SkyTouch Housekeeping Center board.
+                      the head housekeeper. Only <strong>Mark Clean</strong> (housekeeper or head HK) queues Ready on the
+                      SkyTouch board. Collect / write-back need Chromium — they do not run on Vercel. Production uses a
+                      hosted PMS agent (Railway/Docker) with the same DATABASE_URL; see{" "}
+                      <code className="rounded bg-white px-1">docs/PMS-AGENT.md</code>.
         </p>
       </div>
 

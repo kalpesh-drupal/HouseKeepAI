@@ -47,9 +47,18 @@ export async function enqueueSkyTouchBoardWrite(input: {
   return job;
 }
 
-/** Start SkyTouch write immediately after Mark Clean — does not block the housekeeper UI. */
+/** Start SkyTouch write after Mark Clean when Chromium is available (not on Vercel). */
 export function schedulePortalWriteProcessing(hotelId: string) {
-  void processPendingSkyTouchWrites(hotelId).catch((err) => {
+  void (async () => {
+    const { playwrightHostUnsupportedReason } = await import("@/lib/pms/playwright-host");
+    const blocked = playwrightHostUnsupportedReason();
+    if (blocked) {
+      // Leave the job PENDING for `npm run pms:agent:loop` on a host with Chromium.
+      console.info("[portal-write] queued for agent worker:", blocked);
+      return;
+    }
+    await processPendingSkyTouchWrites(hotelId);
+  })().catch((err) => {
     console.error("[portal-write]", err instanceof Error ? err.message : err);
   });
 }

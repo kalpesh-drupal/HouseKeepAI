@@ -18,5 +18,24 @@ services:
       timeout: 5s
       retries: 10
 
+  # Optional local SkyTouch agent (needs portal credentials in DB).
+  # For production, prefer Railway worker — see docs/PMS-AGENT.md
+  #   DATABASE_URL=... NEXTAUTH_SECRET=... docker compose up -d pms-agent
+  pms-agent:
+    build:
+      context: .
+      dockerfile: Dockerfile.pms-agent
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: ${DATABASE_URL:-postgresql://housekeep:housekeep@db:5432/housekeepai?schema=public}
+      NEXTAUTH_SECRET: ${NEXTAUTH_SECRET:-}
+      PMS_CREDENTIALS_KEY: ${PMS_CREDENTIALS_KEY:-}
+      PMS_AGENT_TICK_MS: ${PMS_AGENT_TICK_MS:-60000}
+    depends_on:
+      db:
+        condition: service_healthy
+    profiles:
+      - agent
+
 volumes:
   housekeep_pg:

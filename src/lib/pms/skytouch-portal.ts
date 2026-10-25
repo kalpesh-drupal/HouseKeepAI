@@ -4,6 +4,7 @@ import { tmpdir } from "os";
 import { randomUUID } from "crypto";
 import { housekeepingCheckOffToCsv } from "@/lib/pdf-hk";
 import type { PmsFlashStats } from "@/lib/pms/flash-stats";
+import { assertPlaywrightHost } from "@/lib/pms/playwright-host";
 
 export type PortalSelectors = {
   username?: string;
@@ -198,18 +199,45 @@ async function submitSkyTouchLogin(
 }
 
 async function launchBrowser(chromium: Awaited<ReturnType<typeof loadPlaywright>>["chromium"]) {
+  assertPlaywrightHost();
   const args = ["--disable-dev-shm-usage", "--disable-http2", "--disable-features=IsolateOrigins,site-per-process"];
+  // Docker / hosted agent: use Playwright's bundled Chromium (channel "chrome" is for local Macs).
+  const preferBundled =
+    process.env.PLAYWRIGHT_DOCKER === "1" || process.env.PLAYWRIGHT_CHROMIUM_ONLY === "1";
+
+  const launchBundled = () => chromium.launch({ headless: true, args });
+
+  if (preferBundled) {
+    try {
+      return await launchBundled();
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      throw new Error(`Could not start bundled Chromium for SkyTouch (${message}).`);
+    }
+  }
+
   try {
     return await chromium.launch({
       headless: true,
       channel: "chrome",
       args,
     });
-  } catch {
-    return chromium.launch({
-      headless: true,
-      args,
-    });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    if (/Executable doesn't exist|browserType\.launch/i.test(message)) {
+      throw new Error(
+        "Playwright Chromium is not installed on this machine. Run: npx playwright install chromium"
+      );
+    }
+    try {
+      return await launchBundled();
+    } catch (fallbackErr) {
+      const fallback = fallbackErr instanceof Error ? fallbackErr.message : String(fallbackErr);
+      throw new Error(
+        `Could not start Chromium for SkyTouch portal automation (${fallback}). ` +
+          `On a normal server/Mac run: npx playwright install chromium`
+      );
+    }
   }
 }
 

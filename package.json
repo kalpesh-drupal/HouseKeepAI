@@ -20,6 +20,8 @@
     "health": "curl -s http://localhost:3006/api/health",
     "pms:cron": "curl -s -H \"Authorization: Bearer $CRON_SECRET\" http://localhost:3006/api/pms/cron",
     "pms:cron:loop": "tsx scripts/pms-cron-worker.ts",
+    "pms:agent:loop": "tsx scripts/pms-agent-worker.ts",
+    "pms:agent:docker:build": "docker build -f Dockerfile.pms-agent -t housekeep-pms-agent .",
     "dev:with-cron": "npm run pms:cron:loop & npm run dev",
     "postinstall": "prisma generate"
   },
@@ -36,6 +38,7 @@
     "react-dom": "^19.1.0",
     "recharts": "^2.15.3",
     "tailwind-merge": "^3.3.0",
+    "tsx": "^4.19.4",
     "unpdf": "^1.7.0",
     "xlsx": "^0.18.5"
   },
@@ -50,7 +53,6 @@
     "eslint-config-next": "^15.3.3",
     "prisma": "^6.9.0",
     "tailwindcss": "^4.1.8",
-    "tsx": "^4.19.4",
     "typescript": "^5.8.3"
   }
 }

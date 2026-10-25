@@ -168,18 +168,25 @@ export async function runDuePmsSyncs() {
   });
   const results = [];
 
-  // Always flush pending SkyTouch board write-backs first (clean / ready / dirty).
-  try {
-    const { processPendingSkyTouchWrites } = await import("@/lib/pms/portal-write");
-    const writes = await processPendingSkyTouchWrites();
-    if (writes.jobs > 0) {
-      results.push({ mode: "portal_write", ...writes });
+  const { playwrightHostUnsupportedReason } = await import("@/lib/pms/playwright-host");
+  const playwrightBlocked = playwrightHostUnsupportedReason();
+
+  // Always flush pending SkyTouch board write-backs first (Mark Clean → Ready).
+  if (playwrightBlocked) {
+    results.push({ mode: "portal_write", skipped: true, reason: playwrightBlocked });
+  } else {
+    try {
+      const { processPendingSkyTouchWrites } = await import("@/lib/pms/portal-write");
+      const writes = await processPendingSkyTouchWrites();
+      if (writes.jobs > 0) {
+        results.push({ mode: "portal_write", ...writes });
+      }
+    } catch (err) {
+      results.push({
+        mode: "portal_write",
+        error: err instanceof Error ? err.message : "write queue failed",
+      });
     }
-  } catch (err) {
-    results.push({
-      mode: "portal_write",
-      error: err instanceof Error ? err.message : "write queue failed",
-    });
   }
 
   for (const conn of connections) {
@@ -192,6 +199,16 @@ export async function runDuePmsSyncs() {
     }
 
     if (conn.portalEnabled && conn.provider === "SKYTOUCH") {
+      if (playwrightBlocked) {
+        results.push({
+          provider: conn.provider,
+          hotelId: conn.hotelId,
+          mode: "portal",
+          skipped: true,
+          reason: playwrightBlocked,
+        });
+        continue;
+      }
       try {
         const { runPortalCollect } = await import("@/lib/pms/portal-collect");
         const result = await runPortalCollect(conn.hotelId, conn.provider);
