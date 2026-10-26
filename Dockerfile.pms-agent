@@ -21,5 +21,5 @@ COPY src ./src
 
 ENV NODE_ENV=production
 
-# No public HTTP — Railway/Fly should mark this as a worker (no port required).
+# Railway injects PORT; the worker serves a tiny / health response so checks pass.
 CMD ["npm", "run", "pms:agent:loop"]

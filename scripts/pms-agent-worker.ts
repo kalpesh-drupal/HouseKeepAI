@@ -9,6 +9,7 @@
  *   docker build -f Dockerfile.pms-agent -t housekeep-pms-agent .
  *   See docs/PMS-AGENT.md
  */
+import { createServer } from "http";
 import { readFileSync, existsSync, appendFileSync, mkdirSync, writeFileSync } from "fs";
 import path from "path";
 import { PrismaClient, PmsProvider } from "@prisma/client";
@@ -50,6 +51,25 @@ function log(message: string) {
   }
 }
 
+/** Railway healthchecks expect something listening on $PORT. */
+function startHealthServer() {
+  const port = Number(process.env.PORT || 0);
+  if (!port) {
+    log("no PORT set — skipping health server (ok for local / pure worker hosts)");
+    return;
+  }
+  const server = createServer((_req, res) => {
+    res.writeHead(200, { "Content-Type": "text/plain" });
+    res.end("ok");
+  });
+  server.listen(port, "0.0.0.0", () => {
+    log(`health server listening on 0.0.0.0:${port}`);
+  });
+  server.on("error", (err) => {
+    log(`health server error: ${err instanceof Error ? err.message : String(err)}`);
+  });
+}
+
 let busy = false;
 
 async function runOnce() {
@@ -64,6 +84,7 @@ async function runOnce() {
   const prisma = new PrismaClient();
 
   try {
+    await prisma.$connect();
     const writes = await processPendingSkyTouchWrites();
     if (writes.jobs > 0) {
       log(`write-back jobs=${writes.jobs} updated=${writes.updated} failed=${writes.failed}`);
@@ -72,6 +93,7 @@ async function runOnce() {
     const connections = await prisma.pmsConnection.findMany({
       where: { portalEnabled: true, provider: PmsProvider.SKYTOUCH },
     });
+    log(`tick ok hotels_with_portal=${connections.length}`);
     for (const conn of connections) {
       const intervalMs = Math.max(1, conn.syncIntervalMinutes || 10) * 60 * 1000;
       const due = !conn.lastSyncAt || Date.now() - conn.lastSyncAt.getTime() >= intervalMs;
@@ -86,7 +108,7 @@ async function runOnce() {
       }
     }
   } finally {
-    await prisma.$disconnect();
+    await prisma.$disconnect().catch(() => undefined);
     busy = false;
   }
 }
@@ -95,6 +117,11 @@ async function main() {
   // Local only — in Docker/Railway, env vars are injected by the platform.
   loadEnvFile(path.join(ROOT, ".env"));
   loadEnvFile(path.join(ROOT, ".env.local"));
+
+  log(
+    `boot has_DATABASE_URL=${Boolean(process.env.DATABASE_URL)} has_NEXTAUTH_SECRET=${Boolean(process.env.NEXTAUTH_SECRET)} has_PMS_CREDENTIALS_KEY=${Boolean(process.env.PMS_CREDENTIALS_KEY)}`
+  );
+
   if (!process.env.DATABASE_URL) {
     throw new Error("DATABASE_URL is required (same production Postgres as Vercel)");
   }
@@ -109,13 +136,20 @@ async function main() {
     // ignore
   }
 
+  // Keep Railway's healthcheck happy before the first (possibly slow) collect.
+  startHealthServer();
+
   log(
     `PMS agent started pid=${process.pid} tick=${TICK_MS / 1000}s docker=${process.env.PLAYWRIGHT_DOCKER || "0"}`
   );
 
-  await runOnce();
+  // Never exit the process on a failed tick — Railway would restart-loop.
+  const safeTick = () =>
+    runOnce().catch((err) => log(`ERROR ${err instanceof Error ? err.message : String(err)}`));
+
+  await safeTick();
   setInterval(() => {
-    void runOnce().catch((err) => log(`ERROR ${err instanceof Error ? err.message : String(err)}`));
+    void safeTick();
   }, TICK_MS);
 
   const shutdown = () => {

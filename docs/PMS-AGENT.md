@@ -22,18 +22,31 @@ Hotels only connect SkyTouch credentials in the PMS settings UI. They never inst
 4. Settings → **Deploy**:
    - Custom start command can stay empty (image `CMD` is `npm run pms:agent:loop`)
    - Restart policy: on failure
-   - **No public domain / no HTTP port** — this is a worker
+   - Healthcheck path: `/` (optional — the agent listens on Railway’s `$PORT` and returns `ok`)
+   - You do **not** need a public domain for Collect to work
 5. **Variables** (copy from the Vercel / web service):
    - `DATABASE_URL` → use the **private** Railway Postgres URL if the agent is in the same project
    - `NEXTAUTH_SECRET` (or `PMS_CREDENTIALS_KEY` if you set one on Vercel)
 6. Deploy. In logs you should see:
    ```text
+   boot has_DATABASE_URL=true has_NEXTAUTH_SECRET=true ...
+   health server listening on 0.0.0.0:...
    PMS agent started pid=... tick=60s docker=1
-   collect hotel=...
+   tick ok hotels_with_portal=...
    ```
 7. In HouseKeepAI → PMS: enable SkyTouch portal + save credentials. Within ~10 minutes the agent should collect; Mark Clean should write back within about a minute.
 
 **Resources:** give the service at least **2 GB RAM** (Chromium).
+
+### If it crashes
+
+| Log / symptom | Fix |
+|---------------|-----|
+| `DATABASE_URL is required` | Add `DATABASE_URL` (Postgres variable reference) |
+| `Set PMS_CREDENTIALS_KEY or NEXTAUTH_SECRET` | Copy `NEXTAUTH_SECRET` from Vercel |
+| `boot has_DATABASE_URL=false` | Variable not attached to **this** service |
+| OOM / killed | Raise memory to 2 GB+ |
+| Instant restart loop, no boot line | Wrong Dockerfile path or build failed — check Build logs |
 
 ## Deploy with Docker (any VPS)
 
