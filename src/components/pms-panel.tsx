@@ -261,7 +261,12 @@ export function PmsPanel({ connections, logs }: { connections: Connection[]; log
           ? ` Room board: ${String(data.boardError)}`
           : "";
       const text = data.success
-        ? `${flashPart || "Collect finished."}${boardPart}`.trim()
+        ? data.deferred
+          ? String(
+              data.message ||
+                "Portal sync is enabled. The Railway PMS agent will collect from SkyTouch automatically (about every 10 minutes)."
+            )
+          : `${flashPart || "Collect finished."}${boardPart}`.trim()
         : String(data.error || "Portal collect failed");
       setMessage(text);
       setPortalStatus(text);
@@ -288,9 +293,10 @@ export function PmsPanel({ connections, logs }: { connections: Connection[]; log
           <strong>Housekeeping Center</strong> to read the live board, then opens the Housekeeping Check-Off List to
                       double-check room status. Passwords are encrypted at rest. Ready to inspect stays in HouseKeepAI for
                       the head housekeeper. Only <strong>Mark Clean</strong> (housekeeper or head HK) queues Ready on the
-                      SkyTouch board. Collect / write-back need Chromium — they do not run on Vercel. Production uses a
-                      hosted PMS agent (Railway/Docker) with the same DATABASE_URL; see{" "}
-                      <code className="rounded bg-white px-1">docs/PMS-AGENT.md</code>.
+                      SkyTouch board. On Vercel, clicking Collect only enables portal sync — the Railway{" "}
+                      <strong>pms-agent</strong> does the real SkyTouch collect and Mark Clean write-back. Save login +
+                      enable portal, then watch agent logs for <code className="rounded bg-white px-1">collect hotel=…</code>
+                      .
         </p>
       </div>
 

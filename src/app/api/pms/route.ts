@@ -138,6 +138,25 @@ export async function POST(req: NextRequest) {
 
   if (body.action === "portal_collect") {
     try {
+      const { playwrightHostUnsupportedReason } = await import("@/lib/pms/playwright-host");
+      const deferred = playwrightHostUnsupportedReason();
+      if (deferred) {
+        // Keep portal on so the Railway agent picks this hotel up on its next tick.
+        await prisma.pmsConnection.updateMany({
+          where: { hotelId: session.user.hotelId, provider },
+          data: { portalEnabled: true },
+        });
+        return NextResponse.json({
+          success: true,
+          deferred: true,
+          message: deferred,
+          updated: 0,
+          created: 0,
+          skipped: 0,
+          warnings: [],
+        });
+      }
+
       const result = await runPortalCollect(session.user.hotelId, provider);
       return NextResponse.json({
         success: true,
