@@ -66,7 +66,7 @@ export default function App() {
           <Text style={styles.body}>{error}</Text>
           <Text style={styles.body}>{url}</Text>
           <Text style={styles.hint}>
-            Make sure Next.js is running on port 3006 and the tunnel URL in mobile/.env is current.
+            Store builds use the production site. For local testing, set EXPO_PUBLIC_APP_URL in mobile/.env and restart Expo.
           </Text>
           <Pressable
             style={styles.button}

@@ -7,25 +7,37 @@
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
     "newArchEnabled": true,
+    "scheme": "housekeepai",
     "splash": {
       "image": "./assets/splash-icon.png",
       "resizeMode": "contain",
-      "backgroundColor": "#ffffff"
+      "backgroundColor": "#0B3A5B"
     },
     "ios": {
       "supportsTablet": true,
+      "bundleIdentifier": "com.housekeepai.app",
       "infoPlist": {
-        "NSAppTransportSecurity": {
-          "NSAllowsArbitraryLoads": true
-        }
+        "CFBundleDisplayName": "HouseKeepAI",
+        "NSCameraUsageDescription": "HouseKeepAI uses the camera for room photos and inspection evidence.",
+        "NSPhotoLibraryUsageDescription": "HouseKeepAI lets staff attach room and maintenance photos from the library.",
+        "ITSAppUsesNonExemptEncryption": false
+      },
+      "config": {
+        "usesNonExemptEncryption": false
       }
     },
     "android": {
+      "package": "com.housekeepai.app",
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
-        "backgroundColor": "#ffffff"
+        "backgroundColor": "#0B3A5B"
       },
-      "usesCleartextTraffic": true,
+      "permissions": [
+        "CAMERA",
+        "READ_MEDIA_IMAGES",
+        "INTERNET",
+        "ACCESS_NETWORK_STATE"
+      ],
       "edgeToEdgeEnabled": true,
       "predictiveBackGestureEnabled": false
     },
@@ -34,6 +46,12 @@
     },
     "plugins": [
       "expo-status-bar"
-    ]
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "ed131e53-9683-44f1-b607-e6e1cafe19e6"
+      }
+    },
+    "owner": "kpatel26"
   }
 }
