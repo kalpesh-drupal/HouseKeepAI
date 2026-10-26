@@ -29,7 +29,8 @@ export default async function FrontDeskPage() {
       <div>
         <h1 className="text-3xl font-bold">Front Desk</h1>
         <p className="text-muted-foreground">
-          Mark VIP, rush clean, move, block, or set out of order — without leaving this screen
+          Mark clean or dirty, VIP, rush, move, block, or out of order — without leaving this screen.
+          Mark clean also queues SkyTouch Ready when portal sync is on.
         </p>
       </div>
 
@@ -55,7 +56,13 @@ export default async function FrontDeskPage() {
                       {guestStayLabel(room.guestStatus, room.status).label}
                     </p>
                     <FrontDeskActions
-                      room={{ id: room.id, number: room.number, isVip: room.isVip, isRush: room.isRush }}
+                      room={{
+                        id: room.id,
+                        number: room.number,
+                        status: room.status,
+                        isVip: room.isVip,
+                        isRush: room.isRush,
+                      }}
                       allRooms={allRooms}
                     />
                   </div>

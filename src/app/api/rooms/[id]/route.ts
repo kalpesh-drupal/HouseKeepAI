@@ -9,8 +9,20 @@ import {
   resetRoomChecklist,
   updateHotelRoomInventory,
 } from "@/lib/room-inventory";
-import { canAssignHousekeepers, canInspectRooms, CLEANING_STAFF_ROLES, isCleaningStaff } from "@/lib/utils";
-import { isAwaitingInspection, markRoomClean, markRoomReadyToInspect, sendRoomBackDirty } from "@/lib/room-cleaning";
+import {
+  canAssignHousekeepers,
+  canInspectRooms,
+  canSetRoomHkStatus,
+  CLEANING_STAFF_ROLES,
+  isCleaningStaff,
+} from "@/lib/utils";
+import {
+  isAwaitingInspection,
+  markRoomClean,
+  markRoomDirty,
+  markRoomReadyToInspect,
+  sendRoomBackDirty,
+} from "@/lib/room-cleaning";
 import { canChooseCleanOutcome } from "@/lib/mobile-routes";
 import { isStayoverRoom } from "@/lib/stay";
 import { beginCleaningSession } from "@/lib/cleaning-log";
@@ -117,13 +129,34 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     case "finish_cleaning":
     case "mark_clean": {
       const awaiting = isAwaitingInspection(room);
-      if (awaiting && !canInspectRooms(session.user.role)) {
-        return NextResponse.json({ error: "Only the head housekeeper can mark this room clean" }, { status: 403 });
-      }
-      if (!awaiting && !canChooseCleanOutcome(room.status, room.cleaningStatus)) {
-        return NextResponse.json({ error: "This room cannot be marked clean right now" }, { status: 400 });
+      const deskCanSet = canSetRoomHkStatus(session.user.role);
+      if (deskCanSet) {
+        if (room.status === RoomStatus.OUT_OF_INVENTORY) {
+          return NextResponse.json({ error: "Out-of-inventory rooms cannot be marked clean here" }, { status: 400 });
+        }
+      } else {
+        if (awaiting && !canInspectRooms(session.user.role)) {
+          return NextResponse.json({ error: "Only the head housekeeper can mark this room clean" }, { status: 403 });
+        }
+        if (!awaiting && !canChooseCleanOutcome(room.status, room.cleaningStatus)) {
+          return NextResponse.json({ error: "This room cannot be marked clean right now" }, { status: 400 });
+        }
       }
       await markRoomClean(room, session.user.id, isCleaningStaff(session.user.role));
+      break;
+    }
+
+    case "mark_dirty": {
+      if (!canSetRoomHkStatus(session.user.role)) {
+        return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+      }
+      if (room.status === RoomStatus.VACANT_DIRTY && room.cleaningStatus === CleaningStatus.NOT_STARTED) {
+        return NextResponse.json({ success: true, already: "dirty" });
+      }
+      if (room.status === RoomStatus.OUT_OF_INVENTORY) {
+        return NextResponse.json({ error: "Out-of-inventory rooms cannot be marked dirty here" }, { status: 400 });
+      }
+      await markRoomDirty(room);
       break;
     }
 

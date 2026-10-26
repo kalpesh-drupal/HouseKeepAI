@@ -155,3 +155,18 @@ export async function sendRoomBackDirty(room: RoomWork) {
   await resetRoomChecklist(room.id);
   // Send-back stays in HouseKeepAI only — SkyTouch updates only on Mark Clean.
 }
+
+/** Front desk / managers: set room dirty for housekeeping (HouseKeepAI only — no SkyTouch write). */
+export async function markRoomDirty(room: RoomWork) {
+  await closePendingInspections(room.id, "REJECTED");
+  await prisma.room.update({
+    where: { id: room.id },
+    data: {
+      status: RoomStatus.VACANT_DIRTY,
+      cleaningStatus: CleaningStatus.NOT_STARTED,
+      manualLock: true,
+      cleaningStartedAt: null,
+    },
+  });
+  await resetRoomChecklist(room.id);
+}

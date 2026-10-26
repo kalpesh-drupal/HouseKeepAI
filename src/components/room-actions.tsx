@@ -6,7 +6,7 @@ import { CleaningStatus, RoomStatus, UserRole } from "@prisma/client";
 import { Loader2 } from "lucide-react";
 import { offlineAwareFetch } from "@/lib/offline/queue";
 import { canChooseCleanOutcome } from "@/lib/mobile-routes";
-import { canInspectRooms } from "@/lib/utils";
+import { canInspectRooms, canSetRoomHkStatus } from "@/lib/utils";
 
 interface RoomActionsProps {
   roomId: string;
@@ -35,6 +35,7 @@ export function RoomActions({
   const router = useRouter();
   const [loading, setLoading] = useState<string | null>(null);
   const canManage = MANAGER_ROLES.includes(userRole);
+  const deskCanSet = canSetRoomHkStatus(userRole);
   const showOutcome = canChooseCleanOutcome(status, cleaningStatus);
   const awaitingInspection = status === RoomStatus.READY_TO_INSPECT || cleaningStatus === CleaningStatus.NEEDS_INSPECTION;
 
@@ -58,7 +59,15 @@ export function RoomActions({
     {
       action: "mark_clean",
       label: "Mark clean",
-      show: showOutcome || (awaitingInspection && canInspectRooms(userRole)),
+      show:
+        showOutcome ||
+        (awaitingInspection && canInspectRooms(userRole)) ||
+        (deskCanSet && status !== RoomStatus.OUT_OF_INVENTORY),
+    },
+    {
+      action: "mark_dirty",
+      label: "Mark dirty",
+      show: deskCanSet && status !== RoomStatus.VACANT_DIRTY && status !== RoomStatus.OUT_OF_INVENTORY,
     },
     {
       action: "ready_to_inspect",

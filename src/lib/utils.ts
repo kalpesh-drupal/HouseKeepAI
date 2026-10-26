@@ -118,6 +118,18 @@ export function canInspectRooms(role: UserRole) {
   return INSPECT_ROLES.includes(role);
 }
 
+/** Front desk (and managers) can force a room clean or dirty on the board. */
+const ROOM_HK_STATUS_ROLES: UserRole[] = [
+  UserRole.FRONT_DESK,
+  UserRole.GENERAL_MANAGER,
+  UserRole.OWNER,
+  UserRole.EXECUTIVE_HOUSEKEEPER,
+];
+
+export function canSetRoomHkStatus(role: UserRole) {
+  return ROOM_HK_STATUS_ROLES.includes(role);
+}
+
 export function cleaningStaffLabel(name: string, role: UserRole) {
   return role === UserRole.EXECUTIVE_HOUSEKEEPER ? `${name} (Head housekeeper)` : name;
 }
