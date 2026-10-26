@@ -39,6 +39,9 @@ yarn-error.log*
 *.tsbuildinfo
 next-env.d.ts
 
+# bundled PMS agent (built in Docker / npm run pms:agent:build)
+/dist/
+
 # prisma
 prisma/*.db
 prisma/*.db-journal

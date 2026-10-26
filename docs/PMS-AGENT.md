@@ -20,7 +20,7 @@ Hotels only connect SkyTouch credentials in the PMS settings UI. They never inst
    - Builder: **Dockerfile**
    - Dockerfile path: `Dockerfile.pms-agent`
 4. Settings → **Deploy**:
-   - Custom start command can stay empty (image `CMD` is `npm run pms:agent:loop`)
+   - Custom start command can stay empty (image `CMD` is `npm run pms:agent:start`)
    - Restart policy: on failure
    - Healthcheck path: `/` (optional — the agent listens on Railway’s `$PORT` and returns `ok`)
    - You do **not** need a public domain for Collect to work

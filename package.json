@@ -21,6 +21,8 @@
     "pms:cron": "curl -s -H \"Authorization: Bearer $CRON_SECRET\" http://localhost:3006/api/pms/cron",
     "pms:cron:loop": "tsx scripts/pms-cron-worker.ts",
     "pms:agent:loop": "tsx scripts/pms-agent-worker.ts",
+    "pms:agent:build": "node scripts/build-pms-agent.mjs",
+    "pms:agent:start": "node dist/pms-agent.cjs",
     "pms:agent:docker:build": "docker build -f Dockerfile.pms-agent -t housekeep-pms-agent .",
     "dev:with-cron": "npm run pms:cron:loop & npm run dev",
     "postinstall": "prisma generate"
@@ -49,6 +51,7 @@
     "@types/node": "^24.0.0",
     "@types/react": "^19.1.6",
     "@types/react-dom": "^19.1.5",
+    "esbuild": "^0.25.12",
     "eslint": "^9.28.0",
     "eslint-config-next": "^15.3.3",
     "prisma": "^6.9.0",
