@@ -10,7 +10,8 @@ Hotels only connect SkyTouch credentials in the PMS settings UI. They never inst
 |----------|-----------------|--------|
 | `DATABASE_URL` | Yes | Production Postgres (Railway) |
 | `NEXTAUTH_SECRET` or `PMS_CREDENTIALS_KEY` | Yes | Must match Vercel so portal passwords decrypt |
-| `PMS_AGENT_TICK_MS` | Optional | Default `60000` (write-backs every minute; collect uses each hotel’s interval) |
+| `PMS_AGENT_TICK_MS` | Optional | Default `60000` (collect loop; each hotel still uses its sync interval) |
+| `PMS_AGENT_WRITE_MS` | Optional | Default `30000` (Mark Clean write-back loop) |
 
 ## Deploy on Railway (recommended this week)
 

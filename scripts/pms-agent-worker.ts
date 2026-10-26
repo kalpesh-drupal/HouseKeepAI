@@ -12,14 +12,16 @@
 import { createServer } from "http";
 import { readFileSync, existsSync, appendFileSync, mkdirSync, writeFileSync } from "fs";
 import path from "path";
-import { PrismaClient, PmsProvider } from "@prisma/client";
+import { PrismaClient, PmsProvider, PmsWriteJobStatus } from "@prisma/client";
 
 const ROOT = process.cwd();
 const LOG_DIR = path.join(ROOT, ".tmp");
 const LOG_FILE = path.join(LOG_DIR, "pms-agent.log");
 const PID_FILE = path.join(LOG_DIR, "pms-agent.pid");
-/** How often to wake up (write-backs every tick; collect respects each hotel interval). */
-const TICK_MS = Math.max(15_000, Number(process.env.PMS_AGENT_TICK_MS || 60_000));
+/** Collect wake interval (write-backs use a faster separate loop). */
+const COLLECT_MS = Math.max(15_000, Number(process.env.PMS_AGENT_TICK_MS || 60_000));
+/** Mark Clean write-backs — keep this short so SkyTouch updates quickly. */
+const WRITE_MS = Math.max(10_000, Number(process.env.PMS_AGENT_WRITE_MS || 30_000));
 
 function loadEnvFile(file: string) {
   if (!existsSync(file)) return;
@@ -70,30 +72,47 @@ function startHealthServer() {
   });
 }
 
-let busy = false;
+let writeBusy = false;
+let collectBusy = false;
 
-async function runOnce() {
-  if (busy) {
-    log("tick skipped (previous run still in progress)");
+async function runWrites() {
+  if (writeBusy) {
+    log("write tick skipped (previous write still in progress)");
     return;
   }
-  busy = true;
-
+  writeBusy = true;
   const { processPendingSkyTouchWrites } = await import("../src/lib/pms/portal-write");
-  const { runPortalCollect } = await import("../src/lib/pms/portal-collect");
   const prisma = new PrismaClient();
-
   try {
     await prisma.$connect();
+    const pending = await prisma.pmsWriteJob.count({
+      where: { provider: PmsProvider.SKYTOUCH, status: PmsWriteJobStatus.PENDING },
+    });
+    if (pending > 0) log(`write-back pending=${pending}`);
     const writes = await processPendingSkyTouchWrites();
     if (writes.jobs > 0) {
       log(`write-back jobs=${writes.jobs} updated=${writes.updated} failed=${writes.failed}`);
     }
+  } finally {
+    await prisma.$disconnect().catch(() => undefined);
+    writeBusy = false;
+  }
+}
 
+async function runCollects() {
+  if (collectBusy) {
+    log("collect tick skipped (previous collect still in progress)");
+    return;
+  }
+  collectBusy = true;
+  const { runPortalCollect } = await import("../src/lib/pms/portal-collect");
+  const prisma = new PrismaClient();
+  try {
+    await prisma.$connect();
     const connections = await prisma.pmsConnection.findMany({
       where: { portalEnabled: true, provider: PmsProvider.SKYTOUCH },
     });
-    log(`tick ok hotels_with_portal=${connections.length}`);
+    log(`collect tick hotels_with_portal=${connections.length}`);
     for (const conn of connections) {
       const intervalMs = Math.max(1, conn.syncIntervalMinutes || 10) * 60 * 1000;
       const due = !conn.lastSyncAt || Date.now() - conn.lastSyncAt.getTime() >= intervalMs;
@@ -109,12 +128,11 @@ async function runOnce() {
     }
   } finally {
     await prisma.$disconnect().catch(() => undefined);
-    busy = false;
+    collectBusy = false;
   }
 }
 
 async function main() {
-  // Local only — in Docker/Railway, env vars are injected by the platform.
   loadEnvFile(path.join(ROOT, ".env"));
   loadEnvFile(path.join(ROOT, ".env.local"));
 
@@ -136,21 +154,25 @@ async function main() {
     // ignore
   }
 
-  // Keep Railway's healthcheck happy before the first (possibly slow) collect.
   startHealthServer();
 
   log(
-    `PMS agent started pid=${process.pid} tick=${TICK_MS / 1000}s docker=${process.env.PLAYWRIGHT_DOCKER || "0"}`
+    `PMS agent started pid=${process.pid} write=${WRITE_MS / 1000}s collect=${COLLECT_MS / 1000}s docker=${process.env.PLAYWRIGHT_DOCKER || "0"}`
   );
 
-  // Never exit the process on a failed tick — Railway would restart-loop.
-  const safeTick = () =>
-    runOnce().catch((err) => log(`ERROR ${err instanceof Error ? err.message : String(err)}`));
+  const safe = (fn: () => Promise<void>, label: string) =>
+    fn().catch((err) => log(`${label} ERROR ${err instanceof Error ? err.message : String(err)}`));
 
-  await safeTick();
+  // Writes first and often — Mark Clean should not wait on a long collect.
+  await safe(runWrites, "write");
+  await safe(runCollects, "collect");
+
   setInterval(() => {
-    void safeTick();
-  }, TICK_MS);
+    void safe(runWrites, "write");
+  }, WRITE_MS);
+  setInterval(() => {
+    void safe(runCollects, "collect");
+  }, COLLECT_MS);
 
   const shutdown = () => {
     log("PMS agent stopping");

@@ -17,8 +17,18 @@ export async function enqueueSkyTouchBoardWrite(input: {
   const connection = await prisma.pmsConnection.findUnique({
     where: { hotelId_provider: { hotelId: input.hotelId, provider: PmsProvider.SKYTOUCH } },
   });
-  if (!connection?.portalEnabled) return null;
-  if (!connection.portalLoginUrl || !connection.portalUsername || !connection.portalPasswordEnc) return null;
+  if (!connection?.portalEnabled) {
+    console.warn(
+      `[portal-write] skip queue room=${input.roomNumber}: SkyTouch portal sync is not enabled`
+    );
+    return null;
+  }
+  if (!connection.portalLoginUrl || !connection.portalUsername || !connection.portalPasswordEnc) {
+    console.warn(
+      `[portal-write] skip queue room=${input.roomNumber}: SkyTouch portal login URL/username/password missing`
+    );
+    return null;
+  }
 
   const condition = boardConditionForAppStatus(input.kind);
 
@@ -44,6 +54,9 @@ export async function enqueueSkyTouchBoardWrite(input: {
     },
   });
 
+  console.info(
+    `[portal-write] queued job=${job.id} room=${input.roomNumber} condition=${condition} for PMS agent`
+  );
   return job;
 }
 
