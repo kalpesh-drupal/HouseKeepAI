@@ -1,10 +1,11 @@
 import { PmsProvider, PmsSyncStatus } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
-import { decryptSecret } from "@/lib/crypto-secret";
+import { decryptSecret, encryptSecret } from "@/lib/crypto-secret";
 import { collectSkyTouchHousekeepingReport } from "@/lib/pms/skytouch-portal";
 import { collectSynxisHousekeepingReport } from "@/lib/pms/synxis-portal";
 import { importPmsReportFile } from "@/lib/pms/import-report";
 import { flashSnapshotCreateData } from "@/lib/pms/flash-stats";
+import type { ImapOtpConfig } from "@/lib/pms/email-otp";
 
 const PORTAL_REPORT_PMS: Partial<Record<PmsProvider, string>> = {
   SKYTOUCH: "SKYTOUCH",
@@ -72,12 +73,48 @@ export async function runPortalCollect(hotelId: string, provider: PmsProvider) {
   };
   try {
     if (provider === PmsProvider.SYNXIS) {
+      let imap: ImapOtpConfig | null = null;
+      if (connection.portalImapHost && connection.portalImapUser && connection.portalImapPasswordEnc) {
+        try {
+          imap = {
+            host: connection.portalImapHost,
+            port: connection.portalImapPort || 993,
+            user: connection.portalImapUser,
+            password: decryptSecret(connection.portalImapPasswordEnc),
+            mailbox: connection.portalImapMailbox || "INBOX",
+          };
+        } catch {
+          throw new Error("Could not decrypt SynXis IMAP password. Re-save it on the PMS page.");
+        }
+      }
+      let sessionJson: string | null = null;
+      if (connection.portalSessionEnc) {
+        try {
+          sessionJson = decryptSecret(connection.portalSessionEnc);
+        } catch {
+          sessionJson = null;
+        }
+      }
       const syn = await collectSynxisHousekeepingReport({
         loginUrl: connection.portalLoginUrl,
         username: connection.portalUsername,
         password,
         selectorsJson: connection.portalSelectors,
+        auth: {
+          storageStateJson: sessionJson,
+          storageStateAt: connection.portalSessionAt,
+          imap,
+        },
       });
+      if (syn.storageStateJson) {
+        await prisma.pmsConnection.update({
+          where: { id: connection.id },
+          data: {
+            portalSessionEnc: encryptSecret(syn.storageStateJson),
+            portalSessionAt: new Date(),
+          },
+        });
+      }
       file = { ...syn, flash: null };
     } else {
       file = await collectSkyTouchHousekeepingReport({

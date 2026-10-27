@@ -19,13 +19,21 @@ const VALID_PROVIDERS: PmsProvider[] = [
   "LITTLE_HOTELIER",
 ];
 
-function publicConnection<T extends { portalPasswordEnc: string | null; apiKey: string | null; apiSecret: string | null }>(
-  connection: T
-) {
-  const { portalPasswordEnc, apiKey, apiSecret, ...rest } = connection;
+function publicConnection<
+  T extends {
+    portalPasswordEnc: string | null;
+    portalSessionEnc?: string | null;
+    portalImapPasswordEnc?: string | null;
+    apiKey: string | null;
+    apiSecret: string | null;
+  },
+>(connection: T) {
+  const { portalPasswordEnc, portalSessionEnc, portalImapPasswordEnc, apiKey, apiSecret, ...rest } = connection;
   return {
     ...rest,
     hasPortalPassword: Boolean(portalPasswordEnc),
+    hasPortalSession: Boolean(portalSessionEnc),
+    hasImapPassword: Boolean(portalImapPasswordEnc),
     hasApiKey: Boolean(apiKey),
     hasApiSecret: Boolean(apiSecret),
     // Keep empty placeholders so existing forms still bind; never return secrets.
@@ -82,6 +90,15 @@ export async function POST(req: NextRequest) {
         portalPasswordEnc = null;
       }
 
+      const imapPasswordRaw = typeof body.portalImapPassword === "string" ? body.portalImapPassword : "";
+      let portalImapPasswordEnc = existing?.portalImapPasswordEnc ?? null;
+      if (imapPasswordRaw.trim()) {
+        portalImapPasswordEnc = encryptSecret(imapPasswordRaw);
+      }
+      if (body.clearImapPassword) {
+        portalImapPasswordEnc = null;
+      }
+
       let portalLoginUrl = typeof body.portalLoginUrl === "string" ? body.portalLoginUrl.trim() : "";
       if (provider === "SKYTOUCH" && portalLoginUrl) {
         try {
@@ -93,6 +110,21 @@ export async function POST(req: NextRequest) {
           );
         }
       }
+
+      const portalImapHost =
+        typeof body.portalImapHost === "string" ? body.portalImapHost.trim() || null : existing?.portalImapHost ?? null;
+      const portalImapUser =
+        typeof body.portalImapUser === "string" ? body.portalImapUser.trim() || null : existing?.portalImapUser ?? null;
+      const portalImapMailbox =
+        typeof body.portalImapMailbox === "string"
+          ? body.portalImapMailbox.trim() || "INBOX"
+          : existing?.portalImapMailbox ?? "INBOX";
+      const portalImapPort = Number(body.portalImapPort) > 0 ? Number(body.portalImapPort) : existing?.portalImapPort ?? 993;
+
+      const clearSession = Boolean(body.clearPortalSession);
+      const sessionUpdate = clearSession
+        ? { portalSessionEnc: null as string | null, portalSessionAt: null as Date | null }
+        : {};
 
       const connection = await prisma.pmsConnection.upsert({
         where: { hotelId_provider: { hotelId: session.user.hotelId, provider } },
@@ -111,6 +143,11 @@ export async function POST(req: NextRequest) {
           portalUsername: body.portalUsername || null,
           portalPasswordEnc,
           portalSelectors: body.portalSelectors || null,
+          portalImapHost,
+          portalImapPort,
+          portalImapUser,
+          portalImapPasswordEnc,
+          portalImapMailbox,
         },
         update: {
           propertyId: body.propertyId || null,
@@ -125,6 +162,12 @@ export async function POST(req: NextRequest) {
           portalUsername: body.portalUsername || null,
           portalPasswordEnc,
           portalSelectors: body.portalSelectors || null,
+          portalImapHost,
+          portalImapPort,
+          portalImapUser,
+          portalImapPasswordEnc,
+          portalImapMailbox,
+          ...sessionUpdate,
         },
       });
       return NextResponse.json({ success: true, connection: publicConnection(connection) });

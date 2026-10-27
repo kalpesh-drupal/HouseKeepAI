@@ -43,7 +43,14 @@ type Connection = {
   portalLoginUrl?: string | null;
   portalUsername?: string | null;
   portalSelectors?: string | null;
+  portalImapHost?: string | null;
+  portalImapPort?: number | null;
+  portalImapUser?: string | null;
+  portalImapMailbox?: string | null;
+  portalSessionAt?: string | null;
   hasPortalPassword?: boolean;
+  hasPortalSession?: boolean;
+  hasImapPassword?: boolean;
   hasApiKey?: boolean;
   hasApiSecret?: boolean;
 };
@@ -71,6 +78,11 @@ type FormState = {
   portalUsername: string;
   portalPassword: string;
   portalSelectors: string;
+  portalImapHost: string;
+  portalImapPort: number;
+  portalImapUser: string;
+  portalImapPassword: string;
+  portalImapMailbox: string;
 };
 
 function emptyForm(): FormState {
@@ -87,6 +99,11 @@ function emptyForm(): FormState {
     portalUsername: "",
     portalPassword: "",
     portalSelectors: "",
+    portalImapHost: "",
+    portalImapPort: 993,
+    portalImapUser: "",
+    portalImapPassword: "",
+    portalImapMailbox: "INBOX",
   };
 }
 
@@ -105,6 +122,11 @@ function formFromConnection(c?: Connection): FormState {
     portalUsername: c.portalUsername || "",
     portalPassword: "",
     portalSelectors: c.portalSelectors || "",
+    portalImapHost: c.portalImapHost || "",
+    portalImapPort: c.portalImapPort || 993,
+    portalImapUser: c.portalImapUser || "",
+    portalImapPassword: "",
+    portalImapMailbox: c.portalImapMailbox || "INBOX",
   };
 }
 
@@ -153,6 +175,7 @@ export function PmsPanel({ connections, logs }: { connections: Connection[]; log
           [provider]: {
             ...prev[provider],
             portalPassword: "",
+            portalImapPassword: "",
             apiKey: "",
             apiSecret: "",
             ...(shouldEnablePortal ? { portalEnabled: true } : {}),
@@ -160,16 +183,16 @@ export function PmsPanel({ connections, logs }: { connections: Connection[]; log
         }));
         const text = `${PROVIDER_LABELS[provider]} settings saved`;
         setMessage(text);
-        if (provider === "SKYTOUCH") setPortalStatus(text);
+        if (provider === "SKYTOUCH" || provider === "SYNXIS") setPortalStatus(text);
       } else {
         const text = String(data.error || "Save failed");
         setMessage(text);
-        if (provider === "SKYTOUCH") setPortalStatus(text);
+        if (provider === "SKYTOUCH" || provider === "SYNXIS") setPortalStatus(text);
       }
     } catch (err) {
       const text = err instanceof Error ? err.message : "Save failed";
       setMessage(text);
-      if (provider === "SKYTOUCH") setPortalStatus(text);
+      if (provider === "SKYTOUCH" || provider === "SYNXIS") setPortalStatus(text);
     } finally {
       setLoading(null);
       router.refresh();
@@ -391,11 +414,11 @@ export function PmsPanel({ connections, logs }: { connections: Connection[]; log
                   )}
                   {isSynxis && (
                     <p className="text-xs text-indigo-900">
-                      Password-only login required (no MFA). Optional selectors JSON may include{" "}
+                      SynXis email OTP + Remember me (~3 days): agent reuses a saved session, then reads a new code from
+                      the bot IMAP inbox when MFA appears. Optional selectors:{" "}
                       <code className="rounded bg-white px-1">boardUrl</code>,{" "}
-                      <code className="rounded bg-white px-1">housekeepingLink</code>,{" "}
-                      <code className="rounded bg-white px-1">cleanControl</code>,{" "}
-                      <code className="rounded bg-white px-1">saveButton</code>.
+                      <code className="rounded bg-white px-1">downloadButton</code>,{" "}
+                      <code className="rounded bg-white px-1">cleanControl</code>.
                     </p>
                   )}
                   <input
@@ -419,6 +442,79 @@ export function PmsPanel({ connections, logs }: { connections: Connection[]; log
                     }
                     className="w-full rounded-xl border border-border bg-white px-3 py-2 text-sm"
                   />
+                  {isSynxis && (
+                    <div className="space-y-2 rounded-lg border border-indigo-200 bg-white/80 p-3">
+                      <p className="text-xs font-semibold text-indigo-950">Email OTP inbox (IMAP)</p>
+                      <p className="text-[11px] text-indigo-900">
+                        Dedicated mailbox that receives SynXis verification codes. Session remembered ~3 days
+                        {conn?.hasPortalSession && conn.portalSessionAt
+                          ? ` · last session ${new Date(conn.portalSessionAt).toLocaleString()}`
+                          : conn?.hasPortalSession
+                            ? " · session saved"
+                            : " · no session yet"}
+                        .
+                      </p>
+                      <input
+                        placeholder="IMAP host (e.g. outlook.office365.com)"
+                        value={f.portalImapHost}
+                        onChange={(e) =>
+                          setForms((p) => ({ ...p, [provider]: { ...p[provider], portalImapHost: e.target.value } }))
+                        }
+                        className="w-full rounded-xl border border-border bg-white px-3 py-2 text-sm"
+                      />
+                      <div className="grid grid-cols-2 gap-2">
+                        <input
+                          type="number"
+                          placeholder="Port"
+                          value={f.portalImapPort}
+                          onChange={(e) =>
+                            setForms((p) => ({
+                              ...p,
+                              [provider]: { ...p[provider], portalImapPort: Number(e.target.value) || 993 },
+                            }))
+                          }
+                          className="w-full rounded-xl border border-border bg-white px-3 py-2 text-sm"
+                        />
+                        <input
+                          placeholder="Mailbox"
+                          value={f.portalImapMailbox}
+                          onChange={(e) =>
+                            setForms((p) => ({
+                              ...p,
+                              [provider]: { ...p[provider], portalImapMailbox: e.target.value },
+                            }))
+                          }
+                          className="w-full rounded-xl border border-border bg-white px-3 py-2 text-sm"
+                        />
+                      </div>
+                      <input
+                        placeholder="IMAP username (email)"
+                        value={f.portalImapUser}
+                        autoComplete="off"
+                        onChange={(e) =>
+                          setForms((p) => ({ ...p, [provider]: { ...p[provider], portalImapUser: e.target.value } }))
+                        }
+                        className="w-full rounded-xl border border-border bg-white px-3 py-2 text-sm"
+                      />
+                      <input
+                        type="password"
+                        placeholder={
+                          conn?.hasImapPassword
+                            ? "IMAP password / app password (saved — enter new to replace)"
+                            : "IMAP password / app password"
+                        }
+                        value={f.portalImapPassword}
+                        autoComplete="new-password"
+                        onChange={(e) =>
+                          setForms((p) => ({
+                            ...p,
+                            [provider]: { ...p[provider], portalImapPassword: e.target.value },
+                          }))
+                        }
+                        className="w-full rounded-xl border border-border bg-white px-3 py-2 text-sm"
+                      />
+                    </div>
+                  )}
                   <textarea
                     placeholder={
                       isSynxis
@@ -444,6 +540,39 @@ export function PmsPanel({ connections, logs }: { connections: Connection[]; log
                     >
                       {loading === `save-${provider}` ? "Saving…" : "Save portal login"}
                     </button>
+                    {isSynxis && (
+                      <button
+                        onClick={async () => {
+                          setLoading(`clear-session-${provider}`);
+                          setMessage(null);
+                          try {
+                            const res = await fetch("/api/pms", {
+                              method: "POST",
+                              headers: { "Content-Type": "application/json" },
+                              body: JSON.stringify({
+                                action: "save",
+                                provider,
+                                ...forms[provider],
+                                clearPortalSession: true,
+                              }),
+                            });
+                            const cleared = await readJson(res);
+                            setMessage(
+                              cleared.success
+                                ? "SynXis remembered session cleared — next collect will request a new email code."
+                                : String(cleared.error || "Could not clear session")
+                            );
+                          } finally {
+                            setLoading(null);
+                            router.refresh();
+                          }
+                        }}
+                        disabled={loading !== null || !conn?.hasPortalSession}
+                        className="rounded-xl border border-indigo-300 bg-white px-4 py-2 text-sm font-medium text-indigo-900 hover:bg-indigo-50 disabled:opacity-50"
+                      >
+                        Clear saved session
+                      </button>
+                    )}
                     <button
                       onClick={() => portalCollect(provider)}
                       disabled={loading !== null}

@@ -1,8 +1,9 @@
 import { PmsBoardCondition, PmsProvider, PmsSyncStatus, PmsWriteJobStatus } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
-import { decryptSecret } from "@/lib/crypto-secret";
+import { decryptSecret, encryptSecret } from "@/lib/crypto-secret";
 import { writeSkyTouchBoardConditions } from "@/lib/pms/skytouch-portal";
 import { writeSynxisRoomsClean } from "@/lib/pms/synxis-portal";
+import type { ImapOtpConfig } from "@/lib/pms/email-otp";
 
 /** Providers that can receive Mark Clean portal write-back when portalEnabled. */
 const PORTAL_WRITE_PROVIDERS = [PmsProvider.SKYTOUCH, PmsProvider.SYNXIS] as const;
@@ -177,13 +178,49 @@ export async function processPendingSynxisWrites(hotelId?: string) {
     provider: PmsProvider.SYNXIS,
     condition: PmsBoardCondition.CLEAN,
     write: async (connection, password, rooms) => {
+      let imap: ImapOtpConfig | null = null;
+      if (connection.portalImapHost && connection.portalImapUser && connection.portalImapPasswordEnc) {
+        try {
+          imap = {
+            host: connection.portalImapHost,
+            port: connection.portalImapPort || 993,
+            user: connection.portalImapUser,
+            password: decryptSecret(connection.portalImapPasswordEnc),
+            mailbox: connection.portalImapMailbox || "INBOX",
+          };
+        } catch {
+          throw new Error("Could not decrypt SynXis IMAP password");
+        }
+      }
+      let sessionJson: string | null = null;
+      if (connection.portalSessionEnc) {
+        try {
+          sessionJson = decryptSecret(connection.portalSessionEnc);
+        } catch {
+          sessionJson = null;
+        }
+      }
       const result = await writeSynxisRoomsClean({
         loginUrl: connection.portalLoginUrl!,
         username: connection.portalUsername!,
         password,
         selectorsJson: connection.portalSelectors,
         roomNumbers: rooms,
+        auth: {
+          storageStateJson: sessionJson,
+          storageStateAt: connection.portalSessionAt,
+          imap,
+        },
       });
+      if (result.storageStateJson && connection.id) {
+        await prisma.pmsConnection.update({
+          where: { id: connection.id },
+          data: {
+            portalSessionEnc: encryptSecret(result.storageStateJson),
+            portalSessionAt: new Date(),
+          },
+        });
+      }
       return {
         rooms: result.rooms.map((r) => ({ roomNumber: r.roomNumber, ok: r.ok, error: r.error })),
         error: result.error,
@@ -198,11 +235,19 @@ async function processProviderWrites(opts: {
   condition: PmsBoardCondition;
   write: (
     connection: {
+      id: string;
       portalLoginUrl: string | null;
       portalUsername: string | null;
       portalPasswordEnc: string | null;
       portalSelectors: string | null;
       portalEnabled: boolean;
+      portalSessionEnc: string | null;
+      portalSessionAt: Date | null;
+      portalImapHost: string | null;
+      portalImapPort: number | null;
+      portalImapUser: string | null;
+      portalImapPasswordEnc: string | null;
+      portalImapMailbox: string | null;
     },
     password: string,
     roomNumbers: string[]

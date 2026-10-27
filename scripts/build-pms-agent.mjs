@@ -24,6 +24,7 @@ await esbuild.build({
     "playwright",
     "playwright-core",
     "unpdf",
+    "imapflow",
   ],
   logLevel: "info",
 });

@@ -412,6 +412,15 @@ model PmsConnection {
   portalPasswordEnc    String?
   /// Optional JSON overrides for login / report download selectors.
   portalSelectors      String?
+  /// Playwright storageState (encrypted) — SynXis "Remember me" ~3 days.
+  portalSessionEnc     String?     @db.Text
+  portalSessionAt      DateTime?
+  /// IMAP inbox used to read SynXis / Duo email OTP when session expires.
+  portalImapHost       String?
+  portalImapPort       Int         @default(993)
+  portalImapUser       String?
+  portalImapPasswordEnc String?
+  portalImapMailbox    String?     @default("INBOX")
   /// Latest SkyTouch Welcome/Home flash stats (occupancy, ADR, arrivals, etc.).
   portalFlashJson      String?
   portalFlashAt        DateTime?

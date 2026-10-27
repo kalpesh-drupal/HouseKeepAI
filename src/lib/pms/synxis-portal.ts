@@ -1,6 +1,9 @@
 /**
  * SynXis / SynXis Property Hub — Playwright collect + Mark Clean write-back (no official API yet).
  * Opt-in: hotel enables portal on the PMS page and supplies login (+ optional selectors).
+ *
+ * MFA: SynXis email OTP + "Remember me" (~3 days). We reuse Playwright storageState when fresh,
+ * and only poll IMAP for a new code when the session expired.
  */
 import path from "path";
 import { mkdir, rm, readFile } from "fs/promises";
@@ -8,6 +11,7 @@ import { tmpdir } from "os";
 import { randomUUID } from "crypto";
 import { extractPdfText, printedRoomListToCsv } from "@/lib/pdf-hk";
 import { assertPlaywrightHost } from "@/lib/pms/playwright-host";
+import { fetchEmailOtp, type ImapOtpConfig } from "@/lib/pms/email-otp";
 
 export type SynxisPortalSelectors = {
   username?: string;
@@ -18,6 +22,11 @@ export type SynxisPortalSelectors = {
   cleanControl?: string;
   saveButton?: string;
   downloadButton?: string;
+  /** Checkbox / control for Remember me (defaults cover common labels). */
+  rememberMe?: string;
+  /** Input for email / Duo OTP when MFA is shown. */
+  otpInput?: string;
+  otpSubmit?: string;
 };
 
 const DEFAULT_SELECTORS: Required<Omit<SynxisPortalSelectors, "boardUrl">> & { boardUrl: string } = {
@@ -35,6 +44,21 @@ const DEFAULT_SELECTORS: Required<Omit<SynxisPortalSelectors, "boardUrl">> & { b
     'button:has-text("Save"), a:has-text("Save"), input[value*="Save" i], button:has-text("Update"), a:has-text("Update")',
   downloadButton:
     'button:has-text("Export"), a:has-text("Export"), button:has-text("Download"), a:has-text("Download"), button:has-text("PDF"), a:has-text("PDF"), button:has-text("Excel"), a:has-text("CSV"), input[value*="Export" i]',
+  rememberMe:
+    'input[type="checkbox"][name*="remember" i], input[type="checkbox"][id*="remember" i], label:has-text("Remember me") input, label:has-text("Remember") input, input[type="checkbox"][name*="trust" i]',
+  otpInput:
+    'input[name*="otp" i], input[name*="code" i], input[name*="passcode" i], input[name*="token" i], input[autocomplete="one-time-code"], input[inputmode="numeric"]',
+  otpSubmit:
+    'button[type="submit"], button:has-text("Verify"), button:has-text("Continue"), button:has-text("Submit"), button:has-text("Confirm"), input[type="submit"]',
+};
+
+/** Re-auth a bit before SynXis' typical 3-day remember window. */
+export const SYNXIS_SESSION_MAX_AGE_MS = 2.5 * 24 * 60 * 60 * 1000;
+
+export type SynxisAuthOptions = {
+  storageStateJson?: string | null;
+  storageStateAt?: Date | string | null;
+  imap?: ImapOtpConfig | null;
 };
 
 function mergeSelectors(raw?: string | null): typeof DEFAULT_SELECTORS {
@@ -85,17 +109,128 @@ async function launchBrowser(chromium: Awaited<ReturnType<typeof loadPlaywright>
   }
 }
 
-async function loginAndOpenBoard(
+function sessionStillFresh(at?: Date | string | null) {
+  if (!at) return false;
+  const t = at instanceof Date ? at.getTime() : new Date(at).getTime();
+  if (!Number.isFinite(t)) return false;
+  return Date.now() - t < SYNXIS_SESSION_MAX_AGE_MS;
+}
+
+async function checkRememberMe(page: import("playwright").Page, selectors: typeof DEFAULT_SELECTORS) {
+  const box = page.locator(selectors.rememberMe).first();
+  if ((await box.count()) === 0) {
+    // Click label text if checkbox is nested oddly
+    const label = page.getByText(/remember\s*me|trust\s*this\s*device|keep\s*me\s*signed/i).first();
+    if ((await label.count()) > 0) {
+      await label.click({ timeout: 3_000 }).catch(() => undefined);
+    }
+    return;
+  }
+  try {
+    if (!(await box.isChecked().catch(() => false))) {
+      await box.check({ timeout: 3_000 }).catch(() => box.click({ timeout: 3_000 }));
+    }
+  } catch {
+    // ignore
+  }
+}
+
+async function pageNeedsLogin(page: import("playwright").Page, selectors: typeof DEFAULT_SELECTORS) {
+  const passVisible = await page.locator(selectors.password).first().isVisible().catch(() => false);
+  if (passVisible) return true;
+  const otpVisible = await page.locator(selectors.otpInput).first().isVisible().catch(() => false);
+  return otpVisible;
+}
+
+async function completeEmailOtpIfPresent(
   page: import("playwright").Page,
-  input: { loginUrl: string; username: string; password: string; selectors: typeof DEFAULT_SELECTORS; timeout: number }
+  selectors: typeof DEFAULT_SELECTORS,
+  imap: ImapOtpConfig | null | undefined
 ) {
+  const otp = page.locator(selectors.otpInput).first();
+  const visible = (await otp.count()) > 0 && (await otp.isVisible().catch(() => false));
+  if (!visible) return;
+
+  if (!imap?.host || !imap.user || !imap.password) {
+    throw new Error(
+      "SynXis asked for an email verification code, but IMAP is not configured. Add the bot inbox on the PMS SynXis portal settings."
+    );
+  }
+
+  // Small delay so the email can leave SynXis/Duo before we poll
+  await new Promise((r) => setTimeout(r, 3000));
+  const code = await fetchEmailOtp(imap);
+  await otp.fill(code);
+  await checkRememberMe(page, selectors);
+  const submit = page.locator(selectors.otpSubmit).first();
+  if ((await submit.count()) > 0) {
+    await submit.click({ timeout: 8_000 }).catch(() => otp.press("Enter"));
+  } else {
+    await otp.press("Enter");
+  }
+  await page.waitForLoadState("domcontentloaded", { timeout: 20_000 }).catch(() => undefined);
+  await new Promise((r) => setTimeout(r, 2000));
+}
+
+async function openHousekeepingBoard(
+  page: import("playwright").Page,
+  loginUrl: string,
+  selectors: typeof DEFAULT_SELECTORS,
+  timeout: number
+) {
+  if (selectors.boardUrl?.trim()) {
+    const board = selectors.boardUrl.trim();
+    const target = /^https?:\/\//i.test(board) ? board : new URL(board, loginUrl).toString();
+    await page.goto(target, { waitUntil: "domcontentloaded", timeout }).catch(() => undefined);
+  } else {
+    const hk = page.locator(selectors.housekeepingLink).first();
+    if ((await hk.count()) > 0) {
+      await hk.click({ timeout: 8_000 }).catch(() => undefined);
+      await page.waitForLoadState("domcontentloaded", { timeout: 15_000 }).catch(() => undefined);
+    }
+  }
+  await new Promise((r) => setTimeout(r, 1500));
+}
+
+/**
+ * Establish a SynXis browser session: reuse Remember-me cookies when fresh,
+ * otherwise password login + email OTP (IMAP) + Remember me.
+ * Returns updated storageState JSON for persistence.
+ */
+async function ensureSynxisSession(
+  context: import("playwright").BrowserContext,
+  page: import("playwright").Page,
+  input: {
+    loginUrl: string;
+    username: string;
+    password: string;
+    selectors: typeof DEFAULT_SELECTORS;
+    timeout: number;
+    auth?: SynxisAuthOptions | null;
+  }
+): Promise<string> {
   const loginUrl = normalizeLoginUrl(input.loginUrl);
+
+  // Try saved session first
+  await page.goto(loginUrl, { waitUntil: "domcontentloaded", timeout: input.timeout }).catch(() => undefined);
+  await new Promise((r) => setTimeout(r, 1000));
+
+  if (!(await pageNeedsLogin(page, input.selectors))) {
+    await openHousekeepingBoard(page, loginUrl, input.selectors, input.timeout);
+    if (!(await pageNeedsLogin(page, input.selectors))) {
+      return JSON.stringify(await context.storageState());
+    }
+  }
+
+  // Full login
   await page.goto(loginUrl, { waitUntil: "domcontentloaded", timeout: input.timeout });
   const user = page.locator(input.selectors.username).first();
   const pass = page.locator(input.selectors.password).first();
   await user.waitFor({ state: "visible", timeout: 25_000 });
   await user.fill(input.username);
   await pass.fill(input.password);
+  await checkRememberMe(page, input.selectors);
+
   const submit = page.locator(input.selectors.submit).first();
   if ((await submit.count()) > 0) {
     await submit.click({ timeout: 8_000 }).catch(() => pass.press("Enter"));
@@ -105,25 +240,31 @@ async function loginAndOpenBoard(
   await page.waitForLoadState("domcontentloaded", { timeout: 20_000 }).catch(() => undefined);
   await new Promise((r) => setTimeout(r, 2000));
 
-  const stillLogin = await page.locator(input.selectors.password).first().isVisible().catch(() => false);
-  if (stillLogin) {
+  await completeEmailOtpIfPresent(page, input.selectors, input.auth?.imap);
+  await checkRememberMe(page, input.selectors);
+
+  if (await pageNeedsLogin(page, input.selectors)) {
+    // Second chance: OTP page appeared after slow redirect
+    await completeEmailOtpIfPresent(page, input.selectors, input.auth?.imap);
+  }
+
+  if (await page.locator(input.selectors.password).first().isVisible().catch(() => false)) {
     throw new Error(
-      "SynXis login failed — check username/password or MFA (portal automation needs password-only login)."
+      "SynXis login failed after password/OTP. Check credentials, IMAP inbox for the code, and Remember me."
     );
   }
 
-  if (input.selectors.boardUrl?.trim()) {
-    const board = input.selectors.boardUrl.trim();
-    const target = /^https?:\/\//i.test(board) ? board : new URL(board, loginUrl).toString();
-    await page.goto(target, { waitUntil: "domcontentloaded", timeout: input.timeout }).catch(() => undefined);
-  } else {
-    const hk = page.locator(input.selectors.housekeepingLink).first();
-    if ((await hk.count()) > 0) {
-      await hk.click({ timeout: 8_000 }).catch(() => undefined);
-      await page.waitForLoadState("domcontentloaded", { timeout: 15_000 }).catch(() => undefined);
-    }
+  await openHousekeepingBoard(page, loginUrl, input.selectors, input.timeout);
+  return JSON.stringify(await context.storageState());
+}
+
+function parseStorageState(json?: string | null): import("playwright").BrowserContextOptions["storageState"] | undefined {
+  if (!json?.trim()) return undefined;
+  try {
+    return JSON.parse(json) as import("playwright").BrowserContextOptions["storageState"];
+  } catch {
+    return undefined;
   }
-  await new Promise((r) => setTimeout(r, 1500));
 }
 
 function csvEscape(value: string) {
@@ -252,10 +393,12 @@ export type SynxisCollectResult = {
   filename: string | null;
   mime: string | null;
   boardError?: string;
+  /** Persist this encrypted on PmsConnection for Remember-me reuse. */
+  storageStateJson?: string | null;
 };
 
 /**
- * Login → open room/HK board → export file if possible, else scrape to SynXis CSV.
+ * Login (session or email OTP) → open room/HK board → export or scrape to SynXis CSV.
  */
 export async function collectSynxisHousekeepingReport(input: {
   loginUrl: string;
@@ -263,6 +406,7 @@ export async function collectSynxisHousekeepingReport(input: {
   password: string;
   selectorsJson?: string | null;
   timeoutMs?: number;
+  auth?: SynxisAuthOptions | null;
 }): Promise<SynxisCollectResult> {
   const selectors = mergeSelectors(input.selectorsJson);
   const timeout = input.timeoutMs ?? 60_000;
@@ -271,24 +415,29 @@ export async function collectSynxisHousekeepingReport(input: {
 
   const { chromium } = await loadPlaywright();
   const browser = await launchBrowser(chromium);
+  let storageStateJson: string | null = null;
 
   try {
+    const useSession =
+      sessionStillFresh(input.auth?.storageStateAt) && Boolean(input.auth?.storageStateJson?.trim());
     const context = await browser.newContext({
       acceptDownloads: true,
       ignoreHTTPSErrors: true,
       viewport: { width: 1400, height: 900 },
       userAgent:
         "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+      ...(useSession ? { storageState: parseStorageState(input.auth?.storageStateJson) } : {}),
     });
     const page = await context.newPage();
     page.setDefaultTimeout(timeout);
 
-    await loginAndOpenBoard(page, {
+    storageStateJson = await ensureSynxisSession(context, page, {
       loginUrl: input.loginUrl,
       username: input.username,
       password: input.password,
       selectors,
       timeout,
+      auth: input.auth,
     });
 
     // 1) Try export / download
@@ -368,7 +517,7 @@ export async function collectSynxisHousekeepingReport(input: {
       throw new Error(boardError || "Logged in to SynXis, but could not collect a room list.");
     }
 
-    return { buffer, filename, mime, boardError };
+    return { buffer, filename, mime, boardError, storageStateJson };
   } finally {
     await browser.close().catch(() => undefined);
     await rm(downloadDir, { recursive: true, force: true }).catch(() => undefined);
@@ -378,6 +527,7 @@ export async function collectSynxisHousekeepingReport(input: {
 export type SynxisBoardWriteResult = {
   rooms: Array<{ roomNumber: string; ok: boolean; error?: string }>;
   error?: string;
+  storageStateJson?: string | null;
 };
 
 /** Mark Clean write-back: set rooms to Clean on the SynXis board. */
@@ -388,6 +538,7 @@ export async function writeSynxisRoomsClean(input: {
   selectorsJson?: string | null;
   timeoutMs?: number;
   roomNumbers: string[];
+  auth?: SynxisAuthOptions | null;
 }): Promise<SynxisBoardWriteResult> {
   if (!input.roomNumbers.length) return { rooms: [] };
 
@@ -397,23 +548,28 @@ export async function writeSynxisRoomsClean(input: {
   const browser = await launchBrowser(chromium);
   const uniqueRooms = [...new Set(input.roomNumbers.map((r) => r.trim()).filter(Boolean))];
   const results: SynxisBoardWriteResult["rooms"] = [];
+  let storageStateJson: string | null = null;
 
   try {
+    const useSession =
+      sessionStillFresh(input.auth?.storageStateAt) && Boolean(input.auth?.storageStateJson?.trim());
     const context = await browser.newContext({
       ignoreHTTPSErrors: true,
       viewport: { width: 1400, height: 900 },
       userAgent:
         "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+      ...(useSession ? { storageState: parseStorageState(input.auth?.storageStateJson) } : {}),
     });
     const page = await context.newPage();
     page.setDefaultTimeout(timeout);
 
-    await loginAndOpenBoard(page, {
+    storageStateJson = await ensureSynxisSession(context, page, {
       loginUrl: input.loginUrl,
       username: input.username,
       password: input.password,
       selectors,
       timeout,
+      auth: input.auth,
     });
 
     for (const roomNumber of uniqueRooms) {
@@ -486,12 +642,13 @@ export async function writeSynxisRoomsClean(input: {
       await new Promise((r) => setTimeout(r, 2000));
     }
 
-    return { rooms: results };
+    return { rooms: results, storageStateJson };
   } catch (err) {
     const message = err instanceof Error ? err.message : "SynXis portal write failed";
     return {
       rooms: uniqueRooms.map((roomNumber) => ({ roomNumber, ok: false, error: message })),
       error: message,
+      storageStateJson,
     };
   } finally {
     await browser.close().catch(() => undefined);
