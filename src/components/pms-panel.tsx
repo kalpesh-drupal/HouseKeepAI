@@ -414,8 +414,8 @@ export function PmsPanel({ connections, logs }: { connections: Connection[]; log
                   )}
                   {isSynxis && (
                     <p className="text-xs text-indigo-900">
-                      SynXis email OTP + Remember me (~3 days): agent reuses a saved session, then reads a new code from
-                      the bot IMAP inbox when MFA appears. Optional selectors:{" "}
+                      SynXis email OTP + Remember me (~3 days), and automatic password rotation when SynXis forces a
+                      ~45-day change (new password stored encrypted). Optional selectors:{" "}
                       <code className="rounded bg-white px-1">boardUrl</code>,{" "}
                       <code className="rounded bg-white px-1">downloadButton</code>,{" "}
                       <code className="rounded bg-white px-1">cleanControl</code>.

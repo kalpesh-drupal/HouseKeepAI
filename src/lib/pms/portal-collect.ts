@@ -106,14 +106,26 @@ export async function runPortalCollect(hotelId: string, provider: PmsProvider) {
           imap,
         },
       });
-      if (syn.storageStateJson) {
+      if (syn.storageStateJson || syn.rotatedPassword) {
         await prisma.pmsConnection.update({
           where: { id: connection.id },
           data: {
-            portalSessionEnc: encryptSecret(syn.storageStateJson),
-            portalSessionAt: new Date(),
+            ...(syn.storageStateJson
+              ? {
+                  portalSessionEnc: encryptSecret(syn.storageStateJson),
+                  portalSessionAt: new Date(),
+                }
+              : {}),
+            ...(syn.rotatedPassword
+              ? { portalPasswordEnc: encryptSecret(syn.rotatedPassword) }
+              : {}),
           },
         });
+        if (syn.rotatedPassword) {
+          console.info(
+            `[portal-collect] SynXis portal password rotated automatically for hotel=${hotelId} (forced change)`
+          );
+        }
       }
       file = { ...syn, flash: null };
     } else {

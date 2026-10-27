@@ -8,7 +8,7 @@
 import path from "path";
 import { mkdir, rm, readFile } from "fs/promises";
 import { tmpdir } from "os";
-import { randomUUID } from "crypto";
+import { randomBytes, randomUUID } from "crypto";
 import { extractPdfText, printedRoomListToCsv } from "@/lib/pdf-hk";
 import { assertPlaywrightHost } from "@/lib/pms/playwright-host";
 import { fetchEmailOtp, type ImapOtpConfig } from "@/lib/pms/email-otp";
@@ -27,6 +27,11 @@ export type SynxisPortalSelectors = {
   /** Input for email / Duo OTP when MFA is shown. */
   otpInput?: string;
   otpSubmit?: string;
+  /** Forced password-change form (every ~45 days). */
+  currentPassword?: string;
+  newPassword?: string;
+  confirmPassword?: string;
+  passwordChangeSubmit?: string;
 };
 
 const DEFAULT_SELECTORS: Required<Omit<SynxisPortalSelectors, "boardUrl">> & { boardUrl: string } = {
@@ -50,6 +55,14 @@ const DEFAULT_SELECTORS: Required<Omit<SynxisPortalSelectors, "boardUrl">> & { b
     'input[name*="otp" i], input[name*="code" i], input[name*="passcode" i], input[name*="token" i], input[autocomplete="one-time-code"], input[inputmode="numeric"]',
   otpSubmit:
     'button[type="submit"], button:has-text("Verify"), button:has-text("Continue"), button:has-text("Submit"), button:has-text("Confirm"), input[type="submit"]',
+  currentPassword:
+    'input[name*="old" i][type="password"], input[name*="current" i][type="password"], input[id*="old" i][type="password"], input[id*="current" i][type="password"]',
+  newPassword:
+    'input[name*="new" i][type="password"], input[id*="new" i][type="password"], input[name*="password1" i], input[autocomplete="new-password"]',
+  confirmPassword:
+    'input[name*="confirm" i][type="password"], input[id*="confirm" i][type="password"], input[name*="password2" i], input[name*="retype" i][type="password"]',
+  passwordChangeSubmit:
+    'button:has-text("Change password"), button:has-text("Update password"), button:has-text("Save"), button:has-text("Submit"), button:has-text("Continue"), input[type="submit"]',
 };
 
 /** Re-auth a bit before SynXis' typical 3-day remember window. */
@@ -136,10 +149,88 @@ async function checkRememberMe(page: import("playwright").Page, selectors: typeo
 }
 
 async function pageNeedsLogin(page: import("playwright").Page, selectors: typeof DEFAULT_SELECTORS) {
+  if (await pageLooksLikePasswordChange(page, selectors)) return false;
   const passVisible = await page.locator(selectors.password).first().isVisible().catch(() => false);
   if (passVisible) return true;
   const otpVisible = await page.locator(selectors.otpInput).first().isVisible().catch(() => false);
   return otpVisible;
+}
+
+async function pageLooksLikePasswordChange(page: import("playwright").Page, selectors: typeof DEFAULT_SELECTORS) {
+  const body = ((await page.locator("body").innerText().catch(() => "")) || "").slice(0, 4000);
+  if (/password\s+(has\s+)?expir|must\s+(be\s+)?change|change\s+your\s+password|reset\s+your\s+password|password\s+expired|update\s+your\s+password/i.test(body)) {
+    return true;
+  }
+  const pwCount = await page.locator('input[type="password"]').count().catch(() => 0);
+  if (pwCount >= 2) {
+    const hasNew =
+      (await page.locator(selectors.newPassword).count().catch(() => 0)) > 0 ||
+      (await page.getByLabel(/new password/i).count().catch(() => 0)) > 0;
+    if (hasNew || pwCount >= 3) return true;
+  }
+  return false;
+}
+
+/** Meets common hotel PMS rules: length, upper, lower, digit, symbol. */
+export function generateSynxisPortalPassword() {
+  const core = randomBytes(9).toString("base64url").replace(/[^a-zA-Z0-9]/g, "x");
+  return `Hk!${core}9A`;
+}
+
+/**
+ * When SynXis forces a password change (~45 days), set a new password and return it
+ * so HouseKeepAI can store it encrypted for the next login.
+ */
+async function completePasswordChangeIfPresent(
+  page: import("playwright").Page,
+  selectors: typeof DEFAULT_SELECTORS,
+  currentPassword: string
+): Promise<string | null> {
+  if (!(await pageLooksLikePasswordChange(page, selectors))) return null;
+
+  const newPassword = generateSynxisPortalPassword();
+  const passwordInputs = page.locator('input[type="password"]');
+  const count = await passwordInputs.count();
+
+  const current = page.locator(selectors.currentPassword).first();
+  const next = page.locator(selectors.newPassword).first();
+  const confirm = page.locator(selectors.confirmPassword).first();
+
+  if ((await current.count()) > 0 && (await next.count()) > 0) {
+    await current.fill(currentPassword);
+    await next.fill(newPassword);
+    if ((await confirm.count()) > 0) await confirm.fill(newPassword);
+  } else if (count >= 3) {
+    await passwordInputs.nth(0).fill(currentPassword);
+    await passwordInputs.nth(1).fill(newPassword);
+    await passwordInputs.nth(2).fill(newPassword);
+  } else if (count === 2) {
+    // Some UIs only ask for new + confirm (current already authenticated)
+    await passwordInputs.nth(0).fill(newPassword);
+    await passwordInputs.nth(1).fill(newPassword);
+  } else {
+    throw new Error(
+      "SynXis requires a password change, but the change form was not recognized. Update portalSelectors (currentPassword/newPassword/confirmPassword) or change the password manually on the PMS page."
+    );
+  }
+
+  const submit = page.locator(selectors.passwordChangeSubmit).first();
+  if ((await submit.count()) > 0) {
+    await submit.click({ timeout: 8_000 }).catch(() => undefined);
+  } else {
+    await passwordInputs.last().press("Enter").catch(() => undefined);
+  }
+  await page.waitForLoadState("domcontentloaded", { timeout: 20_000 }).catch(() => undefined);
+  await new Promise((r) => setTimeout(r, 2500));
+
+  if (await pageLooksLikePasswordChange(page, selectors)) {
+    throw new Error(
+      "SynXis rejected the automatic password change (policy may require a different format). Set a new password in SynXis and save it on the HouseKeepAI PMS page."
+    );
+  }
+
+  console.info("[synxis-portal] password rotated automatically after SynXis forced change");
+  return newPassword;
 }
 
 async function completeEmailOtpIfPresent(
@@ -192,10 +283,15 @@ async function openHousekeepingBoard(
   await new Promise((r) => setTimeout(r, 1500));
 }
 
+type SynxisSessionResult = {
+  storageStateJson: string;
+  /** Set when SynXis forced a password change and we rotated it. */
+  rotatedPassword?: string | null;
+};
+
 /**
  * Establish a SynXis browser session: reuse Remember-me cookies when fresh,
- * otherwise password login + email OTP (IMAP) + Remember me.
- * Returns updated storageState JSON for persistence.
+ * otherwise password login + email OTP (IMAP) + Remember me + forced password change.
  */
 async function ensureSynxisSession(
   context: import("playwright").BrowserContext,
@@ -208,17 +304,27 @@ async function ensureSynxisSession(
     timeout: number;
     auth?: SynxisAuthOptions | null;
   }
-): Promise<string> {
+): Promise<SynxisSessionResult> {
   const loginUrl = normalizeLoginUrl(input.loginUrl);
+  let password = input.password;
+  let rotatedPassword: string | null = null;
 
   // Try saved session first
   await page.goto(loginUrl, { waitUntil: "domcontentloaded", timeout: input.timeout }).catch(() => undefined);
   await new Promise((r) => setTimeout(r, 1000));
 
   if (!(await pageNeedsLogin(page, input.selectors))) {
+    const rotated = await completePasswordChangeIfPresent(page, input.selectors, password);
+    if (rotated) {
+      rotatedPassword = rotated;
+      password = rotated;
+    }
     await openHousekeepingBoard(page, loginUrl, input.selectors, input.timeout);
-    if (!(await pageNeedsLogin(page, input.selectors))) {
-      return JSON.stringify(await context.storageState());
+    if (!(await pageNeedsLogin(page, input.selectors)) && !(await pageLooksLikePasswordChange(page, input.selectors))) {
+      return {
+        storageStateJson: JSON.stringify(await context.storageState()),
+        rotatedPassword,
+      };
     }
   }
 
@@ -228,7 +334,7 @@ async function ensureSynxisSession(
   const pass = page.locator(input.selectors.password).first();
   await user.waitFor({ state: "visible", timeout: 25_000 });
   await user.fill(input.username);
-  await pass.fill(input.password);
+  await pass.fill(password);
   await checkRememberMe(page, input.selectors);
 
   const submit = page.locator(input.selectors.submit).first();
@@ -244,18 +350,29 @@ async function ensureSynxisSession(
   await checkRememberMe(page, input.selectors);
 
   if (await pageNeedsLogin(page, input.selectors)) {
-    // Second chance: OTP page appeared after slow redirect
     await completeEmailOtpIfPresent(page, input.selectors, input.auth?.imap);
   }
 
-  if (await page.locator(input.selectors.password).first().isVisible().catch(() => false)) {
+  const rotated = await completePasswordChangeIfPresent(page, input.selectors, password);
+  if (rotated) {
+    rotatedPassword = rotated;
+    password = rotated;
+  }
+
+  if (
+    (await page.locator(input.selectors.password).first().isVisible().catch(() => false)) &&
+    !(await pageLooksLikePasswordChange(page, input.selectors))
+  ) {
     throw new Error(
       "SynXis login failed after password/OTP. Check credentials, IMAP inbox for the code, and Remember me."
     );
   }
 
   await openHousekeepingBoard(page, loginUrl, input.selectors, input.timeout);
-  return JSON.stringify(await context.storageState());
+  return {
+    storageStateJson: JSON.stringify(await context.storageState()),
+    rotatedPassword,
+  };
 }
 
 function parseStorageState(json?: string | null): import("playwright").BrowserContextOptions["storageState"] | undefined {
@@ -395,6 +512,8 @@ export type SynxisCollectResult = {
   boardError?: string;
   /** Persist this encrypted on PmsConnection for Remember-me reuse. */
   storageStateJson?: string | null;
+  /** New portal password if SynXis forced a ~45-day change and we rotated it. */
+  rotatedPassword?: string | null;
 };
 
 /**
@@ -416,6 +535,7 @@ export async function collectSynxisHousekeepingReport(input: {
   const { chromium } = await loadPlaywright();
   const browser = await launchBrowser(chromium);
   let storageStateJson: string | null = null;
+  let rotatedPassword: string | null = null;
 
   try {
     const useSession =
@@ -431,7 +551,7 @@ export async function collectSynxisHousekeepingReport(input: {
     const page = await context.newPage();
     page.setDefaultTimeout(timeout);
 
-    storageStateJson = await ensureSynxisSession(context, page, {
+    const session = await ensureSynxisSession(context, page, {
       loginUrl: input.loginUrl,
       username: input.username,
       password: input.password,
@@ -439,6 +559,8 @@ export async function collectSynxisHousekeepingReport(input: {
       timeout,
       auth: input.auth,
     });
+    storageStateJson = session.storageStateJson;
+    rotatedPassword = session.rotatedPassword || null;
 
     // 1) Try export / download
     let buffer: Buffer | null = null;
@@ -517,7 +639,7 @@ export async function collectSynxisHousekeepingReport(input: {
       throw new Error(boardError || "Logged in to SynXis, but could not collect a room list.");
     }
 
-    return { buffer, filename, mime, boardError, storageStateJson };
+    return { buffer, filename, mime, boardError, storageStateJson, rotatedPassword };
   } finally {
     await browser.close().catch(() => undefined);
     await rm(downloadDir, { recursive: true, force: true }).catch(() => undefined);
@@ -528,6 +650,7 @@ export type SynxisBoardWriteResult = {
   rooms: Array<{ roomNumber: string; ok: boolean; error?: string }>;
   error?: string;
   storageStateJson?: string | null;
+  rotatedPassword?: string | null;
 };
 
 /** Mark Clean write-back: set rooms to Clean on the SynXis board. */
@@ -549,6 +672,7 @@ export async function writeSynxisRoomsClean(input: {
   const uniqueRooms = [...new Set(input.roomNumbers.map((r) => r.trim()).filter(Boolean))];
   const results: SynxisBoardWriteResult["rooms"] = [];
   let storageStateJson: string | null = null;
+  let rotatedPassword: string | null = null;
 
   try {
     const useSession =
@@ -563,7 +687,7 @@ export async function writeSynxisRoomsClean(input: {
     const page = await context.newPage();
     page.setDefaultTimeout(timeout);
 
-    storageStateJson = await ensureSynxisSession(context, page, {
+    const session = await ensureSynxisSession(context, page, {
       loginUrl: input.loginUrl,
       username: input.username,
       password: input.password,
@@ -571,6 +695,8 @@ export async function writeSynxisRoomsClean(input: {
       timeout,
       auth: input.auth,
     });
+    storageStateJson = session.storageStateJson;
+    rotatedPassword = session.rotatedPassword || null;
 
     for (const roomNumber of uniqueRooms) {
       try {
@@ -642,13 +768,14 @@ export async function writeSynxisRoomsClean(input: {
       await new Promise((r) => setTimeout(r, 2000));
     }
 
-    return { rooms: results, storageStateJson };
+    return { rooms: results, storageStateJson, rotatedPassword };
   } catch (err) {
     const message = err instanceof Error ? err.message : "SynXis portal write failed";
     return {
       rooms: uniqueRooms.map((roomNumber) => ({ roomNumber, ok: false, error: message })),
       error: message,
       storageStateJson,
+      rotatedPassword,
     };
   } finally {
     await browser.close().catch(() => undefined);

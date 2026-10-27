@@ -212,14 +212,26 @@ export async function processPendingSynxisWrites(hotelId?: string) {
           imap,
         },
       });
-      if (result.storageStateJson && connection.id) {
+      if (connection.id && (result.storageStateJson || result.rotatedPassword)) {
         await prisma.pmsConnection.update({
           where: { id: connection.id },
           data: {
-            portalSessionEnc: encryptSecret(result.storageStateJson),
-            portalSessionAt: new Date(),
+            ...(result.storageStateJson
+              ? {
+                  portalSessionEnc: encryptSecret(result.storageStateJson),
+                  portalSessionAt: new Date(),
+                }
+              : {}),
+            ...(result.rotatedPassword
+              ? { portalPasswordEnc: encryptSecret(result.rotatedPassword) }
+              : {}),
           },
         });
+        if (result.rotatedPassword) {
+          console.info(
+            `[portal-write] SynXis portal password rotated automatically for connection=${connection.id}`
+          );
+        }
       }
       return {
         rooms: result.rooms.map((r) => ({ roomNumber: r.roomNumber, ok: r.ok, error: r.error })),
