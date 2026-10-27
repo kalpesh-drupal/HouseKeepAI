@@ -2,82 +2,126 @@ import { PmsBoardCondition, PmsProvider, PmsSyncStatus, PmsWriteJobStatus } from
 import { prisma } from "@/lib/prisma";
 import { decryptSecret } from "@/lib/crypto-secret";
 import { writeSkyTouchBoardConditions } from "@/lib/pms/skytouch-portal";
+import { writeSynxisRoomsClean } from "@/lib/pms/synxis-portal";
 
-/** Mark Clean in HouseKeepAI → Ready on the SkyTouch Housekeeping Center board. */
-export function boardConditionForAppStatus(kind: "clean"): PmsBoardCondition {
-  return PmsBoardCondition.READY;
+/** Providers that can receive Mark Clean portal write-back when portalEnabled. */
+const PORTAL_WRITE_PROVIDERS = [PmsProvider.SKYTOUCH, PmsProvider.SYNXIS] as const;
+
+/** Mark Clean → SkyTouch Ready; SynXis Clean. */
+export function boardConditionForProvider(provider: PmsProvider, kind: "clean"): PmsBoardCondition {
+  if (kind !== "clean") return PmsBoardCondition.DIRTY;
+  return provider === PmsProvider.SYNXIS ? PmsBoardCondition.CLEAN : PmsBoardCondition.READY;
 }
 
+/** @deprecated use boardConditionForProvider — SkyTouch maps Mark Clean → Ready */
+export function boardConditionForAppStatus(kind: "clean"): PmsBoardCondition {
+  return boardConditionForProvider(PmsProvider.SKYTOUCH, kind);
+}
+
+/**
+ * Queue Mark Clean write-back for every enabled portal PMS on this hotel
+ * (SkyTouch and/or SynXis). Hotels that have not enabled portal are skipped.
+ */
+export async function enqueuePortalMarkClean(input: {
+  hotelId: string;
+  roomId: string;
+  roomNumber: string;
+}) {
+  const connections = await prisma.pmsConnection.findMany({
+    where: {
+      hotelId: input.hotelId,
+      provider: { in: [...PORTAL_WRITE_PROVIDERS] },
+      portalEnabled: true,
+    },
+  });
+
+  const jobs = [];
+  for (const connection of connections) {
+    if (!connection.portalLoginUrl || !connection.portalUsername || !connection.portalPasswordEnc) {
+      console.warn(
+        `[portal-write] skip ${connection.provider} room=${input.roomNumber}: portal login incomplete`
+      );
+      continue;
+    }
+
+    const condition = boardConditionForProvider(connection.provider, "clean");
+
+    await prisma.pmsWriteJob.updateMany({
+      where: {
+        hotelId: input.hotelId,
+        provider: connection.provider,
+        roomNumber: input.roomNumber,
+        status: { in: [PmsWriteJobStatus.PENDING, PmsWriteJobStatus.RUNNING] },
+      },
+      data: {
+        status: PmsWriteJobStatus.FAILED,
+        lastError: "Superseded by newer Mark Clean",
+        completedAt: new Date(),
+      },
+    });
+
+    const job = await prisma.pmsWriteJob.create({
+      data: {
+        hotelId: input.hotelId,
+        provider: connection.provider,
+        roomId: input.roomId,
+        roomNumber: input.roomNumber,
+        condition,
+        status: PmsWriteJobStatus.PENDING,
+      },
+    });
+    console.info(
+      `[portal-write] queued job=${job.id} provider=${connection.provider} room=${input.roomNumber} condition=${condition}`
+    );
+    jobs.push(job);
+  }
+
+  if (!jobs.length) {
+    console.warn(
+      `[portal-write] no portal write queued for room=${input.roomNumber} (enable SkyTouch and/or SynXis portal on PMS page)`
+    );
+  }
+  return jobs;
+}
+
+/** @deprecated prefer enqueuePortalMarkClean */
 export async function enqueueSkyTouchBoardWrite(input: {
   hotelId: string;
   roomId: string;
   roomNumber: string;
   kind: "clean";
 }) {
-  const connection = await prisma.pmsConnection.findUnique({
-    where: { hotelId_provider: { hotelId: input.hotelId, provider: PmsProvider.SKYTOUCH } },
-  });
-  if (!connection?.portalEnabled) {
-    console.warn(
-      `[portal-write] skip queue room=${input.roomNumber}: SkyTouch portal sync is not enabled`
-    );
-    return null;
-  }
-  if (!connection.portalLoginUrl || !connection.portalUsername || !connection.portalPasswordEnc) {
-    console.warn(
-      `[portal-write] skip queue room=${input.roomNumber}: SkyTouch portal login URL/username/password missing`
-    );
-    return null;
-  }
-
-  const condition = boardConditionForAppStatus(input.kind);
-
-  // Replace any older pending job for the same room with the latest Mark Clean.
-  await prisma.pmsWriteJob.updateMany({
-    where: {
-      hotelId: input.hotelId,
-      provider: PmsProvider.SKYTOUCH,
-      roomNumber: input.roomNumber,
-      status: { in: [PmsWriteJobStatus.PENDING, PmsWriteJobStatus.RUNNING] },
-    },
-    data: { status: PmsWriteJobStatus.FAILED, lastError: "Superseded by newer Mark Clean", completedAt: new Date() },
-  });
-
-  const job = await prisma.pmsWriteJob.create({
-    data: {
-      hotelId: input.hotelId,
-      provider: PmsProvider.SKYTOUCH,
-      roomId: input.roomId,
-      roomNumber: input.roomNumber,
-      condition,
-      status: PmsWriteJobStatus.PENDING,
-    },
-  });
-
-  console.info(
-    `[portal-write] queued job=${job.id} room=${input.roomNumber} condition=${condition} for PMS agent`
-  );
-  return job;
+  const jobs = await enqueuePortalMarkClean(input);
+  return jobs.find((j) => j.provider === PmsProvider.SKYTOUCH) ?? null;
 }
 
-/** Start SkyTouch write after Mark Clean when Chromium is available (not on Vercel). */
+/** Start portal writes when Chromium is available (not on Vercel). */
 export function schedulePortalWriteProcessing(hotelId: string) {
   void (async () => {
     const { playwrightHostUnsupportedReason } = await import("@/lib/pms/playwright-host");
     const blocked = playwrightHostUnsupportedReason();
     if (blocked) {
-      // Leave the job PENDING for `npm run pms:agent:loop` on a host with Chromium.
       console.info("[portal-write] queued for agent worker:", blocked);
       return;
     }
-    await processPendingSkyTouchWrites(hotelId);
+    await processPendingPortalWrites(hotelId);
   })().catch((err) => {
     console.error("[portal-write]", err instanceof Error ? err.message : err);
   });
 }
 
+export async function processPendingPortalWrites(hotelId?: string) {
+  const sky = await processPendingSkyTouchWrites(hotelId);
+  const syn = await processPendingSynxisWrites(hotelId);
+  return {
+    hotels: sky.hotels + syn.hotels,
+    jobs: sky.jobs + syn.jobs,
+    updated: sky.updated + syn.updated,
+    failed: sky.failed + syn.failed,
+  };
+}
+
 export async function processPendingSkyTouchWrites(hotelId?: string) {
-  // Drop legacy ready-to-inspect / dirty queue items — only Mark Clean → Ready is written.
   await prisma.pmsWriteJob.updateMany({
     where: {
       provider: PmsProvider.SKYTOUCH,
@@ -92,11 +136,83 @@ export async function processPendingSkyTouchWrites(hotelId?: string) {
     },
   });
 
-  const where = {
+  return processProviderWrites({
+    hotelId,
     provider: PmsProvider.SKYTOUCH,
-    status: PmsWriteJobStatus.PENDING,
     condition: PmsBoardCondition.READY,
-    ...(hotelId ? { hotelId } : {}),
+    write: async (connection, password, rooms) => {
+      const result = await writeSkyTouchBoardConditions({
+        loginUrl: connection.portalLoginUrl!,
+        username: connection.portalUsername!,
+        password,
+        selectorsJson: connection.portalSelectors,
+        updates: rooms.map((roomNumber) => ({ roomNumber, condition: "READY" as const })),
+      });
+      return {
+        rooms: result.rooms.map((r) => ({ roomNumber: r.roomNumber, ok: r.ok, error: r.error })),
+        error: result.error,
+      };
+    },
+  });
+}
+
+export async function processPendingSynxisWrites(hotelId?: string) {
+  // SynXis Mark Clean → CLEAN only (ignore READY/DIRTY leftovers).
+  await prisma.pmsWriteJob.updateMany({
+    where: {
+      provider: PmsProvider.SYNXIS,
+      status: PmsWriteJobStatus.PENDING,
+      condition: { in: [PmsBoardCondition.READY, PmsBoardCondition.DIRTY] },
+      ...(hotelId ? { hotelId } : {}),
+    },
+    data: {
+      status: PmsWriteJobStatus.FAILED,
+      lastError: "Cancelled — SynXis portal write-back is Mark Clean → Clean only",
+      completedAt: new Date(),
+    },
+  });
+
+  return processProviderWrites({
+    hotelId,
+    provider: PmsProvider.SYNXIS,
+    condition: PmsBoardCondition.CLEAN,
+    write: async (connection, password, rooms) => {
+      const result = await writeSynxisRoomsClean({
+        loginUrl: connection.portalLoginUrl!,
+        username: connection.portalUsername!,
+        password,
+        selectorsJson: connection.portalSelectors,
+        roomNumbers: rooms,
+      });
+      return {
+        rooms: result.rooms.map((r) => ({ roomNumber: r.roomNumber, ok: r.ok, error: r.error })),
+        error: result.error,
+      };
+    },
+  });
+}
+
+async function processProviderWrites(opts: {
+  hotelId?: string;
+  provider: PmsProvider;
+  condition: PmsBoardCondition;
+  write: (
+    connection: {
+      portalLoginUrl: string | null;
+      portalUsername: string | null;
+      portalPasswordEnc: string | null;
+      portalSelectors: string | null;
+      portalEnabled: boolean;
+    },
+    password: string,
+    roomNumbers: string[]
+  ) => Promise<{ rooms: Array<{ roomNumber: string; ok: boolean; error?: string }>; error?: string }>;
+}) {
+  const where = {
+    provider: opts.provider,
+    status: PmsWriteJobStatus.PENDING,
+    condition: opts.condition,
+    ...(opts.hotelId ? { hotelId: opts.hotelId } : {}),
   };
   const pending = await prisma.pmsWriteJob.findMany({
     where,
@@ -117,14 +233,19 @@ export async function processPendingSkyTouchWrites(hotelId?: string) {
 
   for (const [hid, jobs] of byHotel) {
     const connection = await prisma.pmsConnection.findUnique({
-      where: { hotelId_provider: { hotelId: hid, provider: PmsProvider.SKYTOUCH } },
+      where: { hotelId_provider: { hotelId: hid, provider: opts.provider } },
     });
-    if (!connection?.portalEnabled || !connection.portalLoginUrl || !connection.portalUsername || !connection.portalPasswordEnc) {
+    if (
+      !connection?.portalEnabled ||
+      !connection.portalLoginUrl ||
+      !connection.portalUsername ||
+      !connection.portalPasswordEnc
+    ) {
       await prisma.pmsWriteJob.updateMany({
         where: { id: { in: jobs.map((j) => j.id) } },
         data: {
           status: PmsWriteJobStatus.FAILED,
-          lastError: "SkyTouch portal login is not configured",
+          lastError: `${opts.provider} portal login is not configured`,
           completedAt: new Date(),
         },
       });
@@ -148,7 +269,6 @@ export async function processPendingSkyTouchWrites(hotelId?: string) {
       continue;
     }
 
-    // Latest condition per room wins within this batch.
     const latestByRoom = new Map<string, (typeof jobs)[number]>();
     for (const job of jobs) latestByRoom.set(job.roomNumber, job);
 
@@ -161,16 +281,7 @@ export async function processPendingSkyTouchWrites(hotelId?: string) {
     let hotelUpdated = 0;
     let hotelFailed = 0;
     try {
-      const result = await writeSkyTouchBoardConditions({
-        loginUrl: connection.portalLoginUrl,
-        username: connection.portalUsername,
-        password,
-        selectorsJson: connection.portalSelectors,
-        updates: [...latestByRoom.values()].map((j) => ({
-          roomNumber: j.roomNumber,
-          condition: j.condition as "READY" | "CLEAN" | "DIRTY",
-        })),
-      });
+      const result = await opts.write(connection, password, [...latestByRoom.keys()]);
 
       for (const job of jobs) {
         const latest = latestByRoom.get(job.roomNumber);
@@ -212,7 +323,7 @@ export async function processPendingSkyTouchWrites(hotelId?: string) {
       await prisma.pmsSyncLog.create({
         data: {
           hotelId: hid,
-          provider: PmsProvider.SKYTOUCH,
+          provider: opts.provider,
           action: "PORTAL_WRITE",
           records: hotelUpdated,
           status:
@@ -221,7 +332,7 @@ export async function processPendingSkyTouchWrites(hotelId?: string) {
               : hotelFailed
                 ? PmsSyncStatus.PARTIAL
                 : PmsSyncStatus.SUCCESS,
-          message: `Wrote ${result.rooms.filter((r) => r.ok).length} room(s) to SkyTouch board.${
+          message: `Wrote ${result.rooms.filter((r) => r.ok).length} room(s) via ${opts.provider} portal.${
             result.error ? ` ${result.error}` : ""
           }`,
         },
@@ -236,7 +347,7 @@ export async function processPendingSkyTouchWrites(hotelId?: string) {
       await prisma.pmsSyncLog.create({
         data: {
           hotelId: hid,
-          provider: PmsProvider.SKYTOUCH,
+          provider: opts.provider,
           action: "PORTAL_WRITE",
           records: 0,
           status: PmsSyncStatus.FAILED,

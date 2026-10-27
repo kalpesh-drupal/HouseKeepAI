@@ -3,7 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { INSPECTION_CHECKLIST_ITEMS } from "@/lib/utils";
 import { resetRoomChecklist } from "@/lib/room-inventory";
 import { finishCleaningSession } from "@/lib/cleaning-log";
-import { enqueueSkyTouchBoardWrite, schedulePortalWriteProcessing } from "@/lib/pms/portal-write";
+import { enqueuePortalMarkClean, schedulePortalWriteProcessing } from "@/lib/pms/portal-write";
 
 type RoomWork = {
   id: string;
@@ -88,12 +88,11 @@ export async function markRoomClean(room: RoomWork, actorId: string, actorIsStaf
       housekeeperId: claimingFinish ? claimHousekeeper(room, actorId, actorIsStaff) : room.housekeeperId,
     },
   });
-  // Only Mark Clean writes to SkyTouch (Ready). Ready-to-inspect stays in HouseKeepAI for the head HK.
-  await enqueueSkyTouchBoardWrite({
+  // Mark Clean → portal write-back when SkyTouch and/or SynXis portal is enabled (opt-in).
+  await enqueuePortalMarkClean({
     hotelId: room.hotelId,
     roomId: room.id,
     roomNumber: room.number,
-    kind: "clean",
   });
   schedulePortalWriteProcessing(room.hotelId);
 }

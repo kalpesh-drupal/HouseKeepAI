@@ -287,16 +287,12 @@ export function PmsPanel({ connections, logs }: { connections: Connection[]; log
       )}
 
       <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
-        <p className="font-medium">Secure portal collect (SkyTouch first)</p>
+        <p className="font-medium">Portal automation (opt-in per PMS)</p>
         <p className="mt-1">
-          Without a PMS API, HouseKeepAI logs in with this hotel&apos;s SkyTouch username and password, opens{" "}
-          <strong>Housekeeping Center</strong> to read the live board, then opens the Housekeeping Check-Off List to
-                      double-check room status. Passwords are encrypted at rest. Ready to inspect stays in HouseKeepAI for
-                      the head housekeeper. Only <strong>Mark Clean</strong> (housekeeper or head HK) queues Ready on the
-                      SkyTouch board. On Vercel, clicking Collect only enables portal sync — the Railway{" "}
-                      <strong>pms-agent</strong> does the real SkyTouch collect and Mark Clean write-back. Save login +
-                      enable portal, then watch agent logs for <code className="rounded bg-white px-1">collect hotel=…</code>
-                      .
+          <strong>SkyTouch:</strong> Collect + Mark Clean → Ready (Playwright on Railway pms-agent).{" "}
+          <strong>SynXis:</strong> Mark Clean → Clean write-back only when you enable SynXis portal below (no API
+          required). Turn portal off if the hotel does not want the PMS updated from the app. Passwords are encrypted;
+          tune optional selector JSON if the SynXis screen layout differs.
         </p>
       </div>
 
@@ -314,6 +310,8 @@ export function PmsPanel({ connections, logs }: { connections: Connection[]; log
           const conn = connections.find((c) => c.provider === provider);
           const f = forms[provider] || emptyForm();
           const isSkyTouch = provider === "SKYTOUCH";
+          const isSynxis = provider === "SYNXIS";
+          const showPortal = isSkyTouch || isSynxis;
           return (
             <div key={provider} className="space-y-4 rounded-2xl border border-border bg-card p-6">
               <div className="flex items-center justify-between">
@@ -336,16 +334,30 @@ export function PmsPanel({ connections, logs }: { connections: Connection[]; log
                 </label>
               </div>
 
-              {isSkyTouch && (
-                <div className="space-y-3 rounded-xl border border-emerald-200 bg-emerald-50/60 p-4">
+              {showPortal && (
+                <div
+                  className={`space-y-3 rounded-xl border p-4 ${
+                    isSynxis
+                      ? "border-indigo-200 bg-indigo-50/60"
+                      : "border-emerald-200 bg-emerald-50/60"
+                  }`}
+                >
                   <div className="flex items-center justify-between gap-3">
                     <div>
-                      <p className="text-sm font-semibold text-emerald-950">Portal login collect</p>
-                      <p className="text-xs text-emerald-900">
-                        Use the hotel&apos;s SkyTouch web login. Leave password blank when saving to keep the current one.
+                      <p
+                        className={`text-sm font-semibold ${isSynxis ? "text-indigo-950" : "text-emerald-950"}`}
+                      >
+                        {isSynxis ? "Portal Mark Clean write-back" : "Portal login collect"}
+                      </p>
+                      <p className={`text-xs ${isSynxis ? "text-indigo-900" : "text-emerald-900"}`}>
+                        {isSynxis
+                          ? "Optional. Enable only if this hotel wants Mark Clean in HouseKeepAI to set Clean in SynXis. Leave password blank when saving to keep the current one."
+                          : "Use the hotel&apos;s SkyTouch web login. Leave password blank when saving to keep the current one."}
                       </p>
                     </div>
-                    <label className="flex items-center gap-2 text-sm text-emerald-950">
+                    <label
+                      className={`flex items-center gap-2 text-sm ${isSynxis ? "text-indigo-950" : "text-emerald-950"}`}
+                    >
                       <input
                         type="checkbox"
                         checked={f.portalEnabled}
@@ -360,16 +372,31 @@ export function PmsPanel({ connections, logs }: { connections: Connection[]; log
                     </label>
                   </div>
                   <input
-                    placeholder="https://www.skytouchhos.com/pms/Login.do?cleanSession=true"
+                    placeholder={
+                      isSynxis
+                        ? "https://… SynXis / Property Hub login URL"
+                        : "https://www.skytouchhos.com/pms/Login.do?cleanSession=true"
+                    }
                     value={f.portalLoginUrl}
                     onChange={(e) =>
                       setForms((p) => ({ ...p, [provider]: { ...p[provider], portalLoginUrl: e.target.value } }))
                     }
                     className="w-full rounded-xl border border-border bg-white px-3 py-2 text-sm"
                   />
-                  <p className="text-xs text-emerald-900">
-                    Use the Login.do URL, not ContinueLogin.do (that page is a mid-login redirect and times out).
-                  </p>
+                  {isSkyTouch && (
+                    <p className="text-xs text-emerald-900">
+                      Use the Login.do URL, not ContinueLogin.do (that page is a mid-login redirect and times out).
+                    </p>
+                  )}
+                  {isSynxis && (
+                    <p className="text-xs text-indigo-900">
+                      Password-only login required (no MFA). Optional selectors JSON may include{" "}
+                      <code className="rounded bg-white px-1">boardUrl</code>,{" "}
+                      <code className="rounded bg-white px-1">housekeepingLink</code>,{" "}
+                      <code className="rounded bg-white px-1">cleanControl</code>,{" "}
+                      <code className="rounded bg-white px-1">saveButton</code>.
+                    </p>
+                  )}
                   <input
                     placeholder="Portal username"
                     value={f.portalUsername}
@@ -392,7 +419,11 @@ export function PmsPanel({ connections, logs }: { connections: Connection[]; log
                     className="w-full rounded-xl border border-border bg-white px-3 py-2 text-sm"
                   />
                   <textarea
-                    placeholder='Optional selector JSON, e.g. {"downloadButton":"button:has-text(\"Export\")"}'
+                    placeholder={
+                      isSynxis
+                        ? 'Optional selector JSON, e.g. {"boardUrl":"/path/to/rooms","cleanControl":"button:has-text(\\"Clean\\")"}'
+                        : 'Optional selector JSON, e.g. {"downloadButton":"button:has-text(\\"Export\\")"}'
+                    }
                     value={f.portalSelectors}
                     onChange={(e) =>
                       setForms((p) => ({ ...p, [provider]: { ...p[provider], portalSelectors: e.target.value } }))
@@ -404,19 +435,25 @@ export function PmsPanel({ connections, logs }: { connections: Connection[]; log
                     <button
                       onClick={() => save(provider)}
                       disabled={loading !== null}
-                      className="rounded-xl border border-emerald-700 bg-white px-4 py-2 text-sm font-medium text-emerald-900 hover:bg-emerald-100 disabled:opacity-50"
+                      className={`rounded-xl border bg-white px-4 py-2 text-sm font-medium disabled:opacity-50 ${
+                        isSynxis
+                          ? "border-indigo-700 text-indigo-900 hover:bg-indigo-100"
+                          : "border-emerald-700 text-emerald-900 hover:bg-emerald-100"
+                      }`}
                     >
                       {loading === `save-${provider}` ? "Saving…" : "Save portal login"}
                     </button>
-                    <button
-                      onClick={() => portalCollect(provider)}
-                      disabled={loading !== null}
-                      className="rounded-xl bg-emerald-700 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-800 disabled:opacity-50"
-                    >
-                      {loading === `portal-${provider}` ? "Collecting…" : "Collect from SkyTouch login"}
-                    </button>
+                    {isSkyTouch && (
+                      <button
+                        onClick={() => portalCollect(provider)}
+                        disabled={loading !== null}
+                        className="rounded-xl bg-emerald-700 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-800 disabled:opacity-50"
+                      >
+                        {loading === `portal-${provider}` ? "Collecting…" : "Collect from SkyTouch login"}
+                      </button>
+                    )}
                   </div>
-                  {portalStatus && (
+                  {isSkyTouch && portalStatus && (
                     <p className="rounded-lg border border-emerald-300 bg-white px-3 py-2 text-sm text-emerald-950">
                       {portalStatus}
                     </p>

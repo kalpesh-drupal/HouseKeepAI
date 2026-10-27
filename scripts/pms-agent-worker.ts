@@ -81,15 +81,18 @@ async function runWrites() {
     return;
   }
   writeBusy = true;
-  const { processPendingSkyTouchWrites } = await import("../src/lib/pms/portal-write");
+  const { processPendingPortalWrites } = await import("../src/lib/pms/portal-write");
   const prisma = new PrismaClient();
   try {
     await prisma.$connect();
     const pending = await prisma.pmsWriteJob.count({
-      where: { provider: PmsProvider.SKYTOUCH, status: PmsWriteJobStatus.PENDING },
+      where: {
+        provider: { in: [PmsProvider.SKYTOUCH, PmsProvider.SYNXIS] },
+        status: PmsWriteJobStatus.PENDING,
+      },
     });
     if (pending > 0) log(`write-back pending=${pending}`);
-    const writes = await processPendingSkyTouchWrites();
+    const writes = await processPendingPortalWrites();
     if (writes.jobs > 0) {
       log(`write-back jobs=${writes.jobs} updated=${writes.updated} failed=${writes.failed}`);
     }

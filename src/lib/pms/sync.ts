@@ -176,8 +176,8 @@ export async function runDuePmsSyncs() {
     results.push({ mode: "portal_write", skipped: true, reason: playwrightBlocked });
   } else {
     try {
-      const { processPendingSkyTouchWrites } = await import("@/lib/pms/portal-write");
-      const writes = await processPendingSkyTouchWrites();
+      const { processPendingPortalWrites } = await import("@/lib/pms/portal-write");
+      const writes = await processPendingPortalWrites();
       if (writes.jobs > 0) {
         results.push({ mode: "portal_write", ...writes });
       }
