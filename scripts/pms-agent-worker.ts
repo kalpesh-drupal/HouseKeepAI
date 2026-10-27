@@ -113,7 +113,10 @@ async function runCollects() {
   try {
     await prisma.$connect();
     const connections = await prisma.pmsConnection.findMany({
-      where: { portalEnabled: true, provider: PmsProvider.SKYTOUCH },
+      where: {
+        portalEnabled: true,
+        provider: { in: [PmsProvider.SKYTOUCH, PmsProvider.SYNXIS] },
+      },
     });
     log(`collect tick hotels_with_portal=${connections.length}`);
     for (const conn of connections) {
@@ -123,10 +126,12 @@ async function runCollects() {
       try {
         const result = await runPortalCollect(conn.hotelId, conn.provider);
         log(
-          `collect hotel=${conn.hotelId} updated=${result.imported.updated} created=${result.imported.created} skipped=${result.imported.skipped}`
+          `collect provider=${conn.provider} hotel=${conn.hotelId} updated=${result.imported.updated} created=${result.imported.created} skipped=${result.imported.skipped}`
         );
       } catch (err) {
-        log(`collect ERROR hotel=${conn.hotelId} ${err instanceof Error ? err.message : String(err)}`);
+        log(
+          `collect ERROR provider=${conn.provider} hotel=${conn.hotelId} ${err instanceof Error ? err.message : String(err)}`
+        );
       }
     }
   } finally {

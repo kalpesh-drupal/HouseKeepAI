@@ -289,10 +289,11 @@ export function PmsPanel({ connections, logs }: { connections: Connection[]; log
       <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
         <p className="font-medium">Portal automation (opt-in per PMS)</p>
         <p className="mt-1">
-          <strong>SkyTouch:</strong> Collect + Mark Clean → Ready (Playwright on Railway pms-agent).{" "}
-          <strong>SynXis:</strong> Mark Clean → Clean write-back only when you enable SynXis portal below (no API
-          required). Turn portal off if the hotel does not want the PMS updated from the app. Passwords are encrypted;
-          tune optional selector JSON if the SynXis screen layout differs.
+          <strong>SkyTouch:</strong> Collect + Mark Clean → Ready. <strong>SynXis:</strong> Collect room board + Mark
+          Clean → Clean when portal is enabled (Playwright on Railway pms-agent; no API required). Turn portal off if
+          the hotel does not want PMS automation. Passwords are encrypted; tune selector JSON (
+          <code className="rounded bg-white px-1">boardUrl</code>,{" "}
+          <code className="rounded bg-white px-1">downloadButton</code>) if the SynXis layout differs.
         </p>
       </div>
 
@@ -347,11 +348,11 @@ export function PmsPanel({ connections, logs }: { connections: Connection[]; log
                       <p
                         className={`text-sm font-semibold ${isSynxis ? "text-indigo-950" : "text-emerald-950"}`}
                       >
-                        {isSynxis ? "Portal Mark Clean write-back" : "Portal login collect"}
+                        {isSynxis ? "Portal collect + Mark Clean write-back" : "Portal login collect"}
                       </p>
                       <p className={`text-xs ${isSynxis ? "text-indigo-900" : "text-emerald-900"}`}>
                         {isSynxis
-                          ? "Optional. Enable only if this hotel wants Mark Clean in HouseKeepAI to set Clean in SynXis. Leave password blank when saving to keep the current one."
+                          ? "Optional. Enable to collect SynXis room status into HouseKeepAI and to write Mark Clean back as Clean. Leave password blank when saving to keep the current one."
                           : "Use the hotel&apos;s SkyTouch web login. Leave password blank when saving to keep the current one."}
                       </p>
                     </div>
@@ -443,18 +444,30 @@ export function PmsPanel({ connections, logs }: { connections: Connection[]; log
                     >
                       {loading === `save-${provider}` ? "Saving…" : "Save portal login"}
                     </button>
-                    {isSkyTouch && (
-                      <button
-                        onClick={() => portalCollect(provider)}
-                        disabled={loading !== null}
-                        className="rounded-xl bg-emerald-700 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-800 disabled:opacity-50"
-                      >
-                        {loading === `portal-${provider}` ? "Collecting…" : "Collect from SkyTouch login"}
-                      </button>
-                    )}
+                    <button
+                      onClick={() => portalCollect(provider)}
+                      disabled={loading !== null}
+                      className={`rounded-xl px-4 py-2 text-sm font-medium text-white disabled:opacity-50 ${
+                        isSynxis
+                          ? "bg-indigo-700 hover:bg-indigo-800"
+                          : "bg-emerald-700 hover:bg-emerald-800"
+                      }`}
+                    >
+                      {loading === `portal-${provider}`
+                        ? "Collecting…"
+                        : isSynxis
+                          ? "Collect from SynXis login"
+                          : "Collect from SkyTouch login"}
+                    </button>
                   </div>
-                  {isSkyTouch && portalStatus && (
-                    <p className="rounded-lg border border-emerald-300 bg-white px-3 py-2 text-sm text-emerald-950">
+                  {portalStatus && (isSkyTouch || isSynxis) && (
+                    <p
+                      className={`rounded-lg border bg-white px-3 py-2 text-sm ${
+                        isSynxis
+                          ? "border-indigo-300 text-indigo-950"
+                          : "border-emerald-300 text-emerald-950"
+                      }`}
+                    >
                       {portalStatus}
                     </p>
                   )}

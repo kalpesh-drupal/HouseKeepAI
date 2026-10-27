@@ -2,30 +2,33 @@ import { PmsProvider, PmsSyncStatus } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { decryptSecret } from "@/lib/crypto-secret";
 import { collectSkyTouchHousekeepingReport } from "@/lib/pms/skytouch-portal";
+import { collectSynxisHousekeepingReport } from "@/lib/pms/synxis-portal";
 import { importPmsReportFile } from "@/lib/pms/import-report";
 import { flashSnapshotCreateData } from "@/lib/pms/flash-stats";
 
 const PORTAL_REPORT_PMS: Partial<Record<PmsProvider, string>> = {
   SKYTOUCH: "SKYTOUCH",
-  // Choice Advantage hotels often use the same SkyTouch-hosted check-off report.
+  SYNXIS: "SYNXIS",
 };
 
+const PORTAL_COLLECT_PROVIDERS: PmsProvider[] = [PmsProvider.SKYTOUCH, PmsProvider.SYNXIS];
+
 export async function runPortalCollect(hotelId: string, provider: PmsProvider) {
-  if (provider !== "SKYTOUCH") {
-    throw new Error("Portal collect is available for SkyTouch first. Other PMS portals come next.");
+  if (!PORTAL_COLLECT_PROVIDERS.includes(provider)) {
+    throw new Error("Portal collect is available for SkyTouch and SynXis. Other PMS portals come next.");
   }
 
   const connection = await prisma.pmsConnection.findUnique({
     where: { hotelId_provider: { hotelId, provider } },
   });
   if (!connection) {
-    throw new Error("Save SkyTouch portal login on the PMS page first.");
+    throw new Error(`Save ${provider} portal login on the PMS page first.`);
   }
   if (!connection.portalLoginUrl?.trim()) {
-    throw new Error("Save the hotel's SkyTouch https login URL, then click Collect again.");
+    throw new Error(`Save the hotel's ${provider} https login URL, then click Collect again.`);
   }
   if (!connection.portalUsername?.trim() || !connection.portalPasswordEnc) {
-    throw new Error("Save the SkyTouch portal username and password, then click Collect again.");
+    throw new Error(`Save the ${provider} portal username and password, then click Collect again.`);
   }
   if (!connection.portalEnabled) {
     await prisma.pmsConnection.update({
@@ -59,15 +62,31 @@ export async function runPortalCollect(hotelId: string, provider: PmsProvider) {
     throw err;
   }
 
-  const reportPms = PORTAL_REPORT_PMS[provider] || "SKYTOUCH";
-  let file;
+  const reportPms = PORTAL_REPORT_PMS[provider] || provider;
+  let file: {
+    buffer: Buffer | null;
+    filename: string | null;
+    mime: string | null;
+    flash?: Awaited<ReturnType<typeof collectSkyTouchHousekeepingReport>>["flash"];
+    boardError?: string;
+  };
   try {
-    file = await collectSkyTouchHousekeepingReport({
-      loginUrl: connection.portalLoginUrl,
-      username: connection.portalUsername,
-      password,
-      selectorsJson: connection.portalSelectors,
-    });
+    if (provider === PmsProvider.SYNXIS) {
+      const syn = await collectSynxisHousekeepingReport({
+        loginUrl: connection.portalLoginUrl,
+        username: connection.portalUsername,
+        password,
+        selectorsJson: connection.portalSelectors,
+      });
+      file = { ...syn, flash: null };
+    } else {
+      file = await collectSkyTouchHousekeepingReport({
+        loginUrl: connection.portalLoginUrl,
+        username: connection.portalUsername,
+        password,
+        selectorsJson: connection.portalSelectors,
+      });
+    }
   } catch (err) {
     const message = err instanceof Error ? err.message : "Portal collect failed";
     await prisma.pmsSyncLog.create({
@@ -93,7 +112,6 @@ export async function runPortalCollect(hotelId: string, provider: PmsProvider) {
       prisma.pmsConnection.update({
         where: { id: connection.id },
         data: {
-          // Keep latest copy on the connection for quick reads / fallback.
           portalFlashJson: JSON.stringify(file.flash),
           portalFlashAt: new Date(file.flash.collectedAt),
           lastSyncAt: new Date(),
@@ -137,7 +155,9 @@ export async function runPortalCollect(hotelId: string, provider: PmsProvider) {
     : "";
   const roomPart = file.filename
     ? `Collected ${file.filename}. Updated ${importedSummary.updated}, created ${importedSummary.created}, skipped ${importedSummary.skipped}.`
-    : "Home flash stats collected; room board was not imported.";
+    : provider === PmsProvider.SKYTOUCH
+      ? "Home flash stats collected; room board was not imported."
+      : "SynXis collect finished without a room file.";
 
   const records = importedSummary.updated + importedSummary.created;
   const status =
@@ -161,7 +181,7 @@ export async function runPortalCollect(hotelId: string, provider: PmsProvider) {
   return {
     imported: importedSummary,
     filename: file.filename,
-    flash: file.flash,
+    flash: file.flash ?? null,
     boardError: file.boardError,
   };
 }

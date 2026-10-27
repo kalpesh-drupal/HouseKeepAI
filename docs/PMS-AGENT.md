@@ -5,7 +5,7 @@ Vercel runs the HouseKeepAI web app. **SkyTouch Collect and Mark Clean write-bac
 Hotels only connect portal credentials in the PMS settings UI. They never install an agent.
 
 **SkyTouch:** Collect + Mark Clean → Ready.  
-**SynXis (opt-in):** Mark Clean → Clean write-back when SynXis portal is enabled (Playwright; tune `portalSelectors` if needed). No SynXis collect yet — use report upload or wait for SPH API.
+**SynXis (opt-in):** Collect room board (export or scrape → SynXis CSV import) + Mark Clean → Clean when portal is enabled. Tune `portalSelectors` (`boardUrl`, `downloadButton`, `cleanControl`) per hotel. Prefer SPH API later if Aven grants access.
 
 ## What you need
 

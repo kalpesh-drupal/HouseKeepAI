@@ -1,23 +1,23 @@
 /**
- * SynXis / SynXis Property Hub — Playwright write-back (no official API yet).
- * Opt-in only: hotel enables portal on the PMS page and supplies login + selectors.
- *
- * Mark Clean in HouseKeepAI → set room Housekeeping status to Clean in SynXis UI.
- * Selectors vary by property; tune via portalSelectors JSON when defaults fail.
+ * SynXis / SynXis Property Hub — Playwright collect + Mark Clean write-back (no official API yet).
+ * Opt-in: hotel enables portal on the PMS page and supplies login (+ optional selectors).
  */
+import path from "path";
+import { mkdir, rm, readFile } from "fs/promises";
+import { tmpdir } from "os";
+import { randomUUID } from "crypto";
+import { extractPdfText, printedRoomListToCsv } from "@/lib/pdf-hk";
 import { assertPlaywrightHost } from "@/lib/pms/playwright-host";
 
 export type SynxisPortalSelectors = {
   username?: string;
   password?: string;
   submit?: string;
-  /** Link/button to open housekeeping / room status after login */
   housekeepingLink?: string;
-  /** Optional direct URL path or absolute URL to the HK board (opened after login) */
   boardUrl?: string;
-  /** CSS for the Clean control inside a room row (fallback heuristics also run) */
   cleanControl?: string;
   saveButton?: string;
+  downloadButton?: string;
 };
 
 const DEFAULT_SELECTORS: Required<Omit<SynxisPortalSelectors, "boardUrl">> & { boardUrl: string } = {
@@ -27,12 +27,14 @@ const DEFAULT_SELECTORS: Required<Omit<SynxisPortalSelectors, "boardUrl">> & { b
   submit:
     'button[type="submit"], input[type="submit"], button:has-text("Sign in"), button:has-text("Log in"), button:has-text("Login"), a:has-text("Login")',
   housekeepingLink:
-    'a:has-text("Housekeeping"), a:has-text("Room Status"), a:has-text("Rooms"), button:has-text("Housekeeping"), a:has-text("Property Hub")',
+    'a:has-text("Housekeeping"), a:has-text("Room Status"), a:has-text("Room List"), a:has-text("Rooms"), button:has-text("Housekeeping"), a:has-text("Property Hub")',
   boardUrl: "",
   cleanControl:
     'input[type="radio"][value*="clean" i], input[type="radio"][id*="clean" i], label:has-text("Clean"), button:has-text("Clean"), a:has-text("Clean")',
   saveButton:
     'button:has-text("Save"), a:has-text("Save"), input[value*="Save" i], button:has-text("Update"), a:has-text("Update")',
+  downloadButton:
+    'button:has-text("Export"), a:has-text("Export"), button:has-text("Download"), a:has-text("Download"), button:has-text("PDF"), a:has-text("PDF"), button:has-text("Excel"), a:has-text("CSV"), input[value*="Export" i]',
 };
 
 function mergeSelectors(raw?: string | null): typeof DEFAULT_SELECTORS {
@@ -75,14 +77,301 @@ async function launchBrowser(chromium: Awaited<ReturnType<typeof loadPlaywright>
   const preferBundled =
     process.env.PLAYWRIGHT_DOCKER === "1" || process.env.PLAYWRIGHT_CHROMIUM_ONLY === "1";
   const launchBundled = () => chromium.launch({ headless: true, args });
-
-  if (preferBundled) {
-    return launchBundled();
-  }
+  if (preferBundled) return launchBundled();
   try {
     return await chromium.launch({ headless: true, channel: "chrome", args });
   } catch {
     return launchBundled();
+  }
+}
+
+async function loginAndOpenBoard(
+  page: import("playwright").Page,
+  input: { loginUrl: string; username: string; password: string; selectors: typeof DEFAULT_SELECTORS; timeout: number }
+) {
+  const loginUrl = normalizeLoginUrl(input.loginUrl);
+  await page.goto(loginUrl, { waitUntil: "domcontentloaded", timeout: input.timeout });
+  const user = page.locator(input.selectors.username).first();
+  const pass = page.locator(input.selectors.password).first();
+  await user.waitFor({ state: "visible", timeout: 25_000 });
+  await user.fill(input.username);
+  await pass.fill(input.password);
+  const submit = page.locator(input.selectors.submit).first();
+  if ((await submit.count()) > 0) {
+    await submit.click({ timeout: 8_000 }).catch(() => pass.press("Enter"));
+  } else {
+    await pass.press("Enter");
+  }
+  await page.waitForLoadState("domcontentloaded", { timeout: 20_000 }).catch(() => undefined);
+  await new Promise((r) => setTimeout(r, 2000));
+
+  const stillLogin = await page.locator(input.selectors.password).first().isVisible().catch(() => false);
+  if (stillLogin) {
+    throw new Error(
+      "SynXis login failed — check username/password or MFA (portal automation needs password-only login)."
+    );
+  }
+
+  if (input.selectors.boardUrl?.trim()) {
+    const board = input.selectors.boardUrl.trim();
+    const target = /^https?:\/\//i.test(board) ? board : new URL(board, loginUrl).toString();
+    await page.goto(target, { waitUntil: "domcontentloaded", timeout: input.timeout }).catch(() => undefined);
+  } else {
+    const hk = page.locator(input.selectors.housekeepingLink).first();
+    if ((await hk.count()) > 0) {
+      await hk.click({ timeout: 8_000 }).catch(() => undefined);
+      await page.waitForLoadState("domcontentloaded", { timeout: 15_000 }).catch(() => undefined);
+    }
+  }
+  await new Promise((r) => setTimeout(r, 1500));
+}
+
+function csvEscape(value: string) {
+  if (/[",\n]/.test(value)) return `"${value.replace(/"/g, '""')}"`;
+  return value;
+}
+
+/** Build SynXis-shaped CSV from scraped room rows. */
+function boardRowsToSynxisCsv(
+  rows: Array<{
+    roomNumber: string;
+    roomType?: string;
+    housekeeping?: string;
+    occupancy?: string;
+    guestStatus?: string;
+  }>
+) {
+  const header = "Room,Room Type,Housekeeping Status,Occupancy Status,Guest Status,Check-In,Check-Out,Notes";
+  const lines = rows.map((r) =>
+    [
+      csvEscape(r.roomNumber),
+      csvEscape(r.roomType || ""),
+      csvEscape(r.housekeeping || "Dirty"),
+      csvEscape(r.occupancy || ""),
+      csvEscape(r.guestStatus || ""),
+      "",
+      "",
+      "",
+    ].join(",")
+  );
+  return [header, ...lines].join("\n");
+}
+
+async function scrapeBoardRows(page: import("playwright").Page) {
+  return page.evaluate(() => {
+    const normalize = (s: string) => s.replace(/\s+/g, " ").trim();
+    const out: Array<{
+      roomNumber: string;
+      roomType: string;
+      housekeeping: string;
+      occupancy: string;
+      guestStatus: string;
+    }> = [];
+    const seen = new Set<string>();
+
+    const pickStatus = (text: string) => {
+      const hk = text.match(/\b(Dirty|Clean|Pickup|Inspected|Ready)\b/i)?.[1] || "";
+      const occ = text.match(/\b(Occupied|Vacant)\b/i)?.[1] || "";
+      const guest =
+        text.match(/\b(Stay\s*Overs?|Checked\s*Out|Arrivals?|Arrival|Due\s*Out)\b/i)?.[1] || "";
+      return { hk, occ, guest };
+    };
+
+    const rows = Array.from(document.querySelectorAll("table tr, [role='row']")) as HTMLElement[];
+    for (const tr of rows) {
+      const cells = Array.from(tr.querySelectorAll("td, th, [role='cell'], [role='gridcell']")).map((c) =>
+        normalize(c.textContent || "")
+      );
+      if (cells.length < 2) continue;
+      if (/^room$/i.test(cells[0]) || /housekeeping/i.test(cells.join(" "))) continue;
+
+      let roomNumber = "";
+      let roomType = "";
+      for (const cell of cells) {
+        if (/^[A-Za-z]{0,3}\d{2,4}[A-Za-z]?$/.test(cell) || /^\d{2,4}$/.test(cell)) {
+          roomNumber = cell;
+          break;
+        }
+      }
+      if (!roomNumber) {
+        const m = normalize(tr.innerText || "").match(/\b([A-Za-z]{0,3}\d{2,4}[A-Za-z]?)\b/);
+        if (m) roomNumber = m[1];
+      }
+      if (!roomNumber || seen.has(roomNumber)) continue;
+
+      const joined = cells.join(" | ");
+      const { hk, occ, guest } = pickStatus(joined);
+      if (!hk && !occ) continue;
+
+      for (const cell of cells) {
+        if (cell !== roomNumber && /^[A-Za-z]{1,4}\d*$/.test(cell) && cell.length <= 6) {
+          roomType = cell;
+          break;
+        }
+      }
+
+      seen.add(roomNumber);
+      out.push({
+        roomNumber,
+        roomType,
+        housekeeping: hk || "Dirty",
+        occupancy: occ,
+        guestStatus: guest,
+      });
+    }
+
+    // Fallback: div-based boards
+    if (out.length < 3) {
+      const blocks = Array.from(document.querySelectorAll("div, li")) as HTMLElement[];
+      for (const el of blocks) {
+        const text = normalize(el.innerText || "");
+        if (text.length > 220 || text.length < 5) continue;
+        const m = text.match(/\b([A-Za-z]{0,3}\d{2,4}[A-Za-z]?)\b/);
+        if (!m) continue;
+        const roomNumber = m[1];
+        if (seen.has(roomNumber)) continue;
+        const { hk, occ, guest } = pickStatus(text);
+        if (!hk) continue;
+        seen.add(roomNumber);
+        out.push({
+          roomNumber,
+          roomType: "",
+          housekeeping: hk,
+          occupancy: occ,
+          guestStatus: guest,
+        });
+      }
+    }
+
+    return out;
+  });
+}
+
+export type SynxisCollectResult = {
+  buffer: Buffer | null;
+  filename: string | null;
+  mime: string | null;
+  boardError?: string;
+};
+
+/**
+ * Login → open room/HK board → export file if possible, else scrape to SynXis CSV.
+ */
+export async function collectSynxisHousekeepingReport(input: {
+  loginUrl: string;
+  username: string;
+  password: string;
+  selectorsJson?: string | null;
+  timeoutMs?: number;
+}): Promise<SynxisCollectResult> {
+  const selectors = mergeSelectors(input.selectorsJson);
+  const timeout = input.timeoutMs ?? 60_000;
+  const downloadDir = path.join(tmpdir(), `synxis-hk-${randomUUID()}`);
+  await mkdir(downloadDir, { recursive: true });
+
+  const { chromium } = await loadPlaywright();
+  const browser = await launchBrowser(chromium);
+
+  try {
+    const context = await browser.newContext({
+      acceptDownloads: true,
+      ignoreHTTPSErrors: true,
+      viewport: { width: 1400, height: 900 },
+      userAgent:
+        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    });
+    const page = await context.newPage();
+    page.setDefaultTimeout(timeout);
+
+    await loginAndOpenBoard(page, {
+      loginUrl: input.loginUrl,
+      username: input.username,
+      password: input.password,
+      selectors,
+      timeout,
+    });
+
+    // 1) Try export / download
+    let buffer: Buffer | null = null;
+    let filename: string | null = null;
+    let mime: string | null = null;
+    let boardError: string | undefined;
+
+    try {
+      const dlBtn = page.locator(selectors.downloadButton).first();
+      if ((await dlBtn.count()) > 0 && (await dlBtn.isVisible().catch(() => false))) {
+        const [download] = await Promise.all([
+          page.waitForEvent("download", { timeout: 20_000 }).catch(() => null),
+          dlBtn.click({ timeout: 8_000 }),
+        ]);
+        if (download) {
+          const suggested = download.suggestedFilename() || `synxis-export-${Date.now()}.bin`;
+          const dest = path.join(downloadDir, suggested);
+          await download.saveAs(dest);
+          buffer = await readFile(dest);
+          filename = suggested;
+          const lower = suggested.toLowerCase();
+          if (lower.endsWith(".pdf")) mime = "application/pdf";
+          else if (lower.endsWith(".csv")) mime = "text/csv";
+          else if (lower.endsWith(".xlsx") || lower.endsWith(".xls")) {
+            mime = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+          } else mime = "application/octet-stream";
+
+          // Prefer SynXis CSV shape when PDF text can be parsed
+          if (mime === "application/pdf") {
+            try {
+              const text = await extractPdfText(buffer);
+              const csv = printedRoomListToCsv(text);
+              if (csv) {
+                buffer = Buffer.from(csv, "utf8");
+                filename = `synxis-board-${Date.now()}.csv`;
+                mime = "text/csv";
+              }
+            } catch {
+              // keep raw PDF — import-report may still handle it
+            }
+          }
+        }
+      }
+    } catch (err) {
+      boardError = err instanceof Error ? err.message : "Export download failed";
+    }
+
+    // 2) Scrape board → CSV if no usable export
+    if (!buffer) {
+      try {
+        let rows: Awaited<ReturnType<typeof scrapeBoardRows>> = [];
+        for (let attempt = 0; attempt < 4; attempt++) {
+          rows = await scrapeBoardRows(page);
+          if (rows.length >= 3) break;
+          await new Promise((r) => setTimeout(r, 1200));
+        }
+        if (rows.length < 3) {
+          boardError =
+            boardError ||
+            `Could not read SynXis room board (parsed ${rows.length} rooms). Set portalSelectors.boardUrl or downloadButton for this hotel.`;
+        } else {
+          const csv = boardRowsToSynxisCsv(rows);
+          buffer = Buffer.from(csv, "utf8");
+          filename = `synxis-board-${Date.now()}.csv`;
+          mime = "text/csv";
+          boardError = undefined;
+        }
+      } catch (err) {
+        boardError = err instanceof Error ? err.message : "SynXis board scrape failed";
+      }
+    }
+
+    await context.close();
+
+    if (!buffer) {
+      throw new Error(boardError || "Logged in to SynXis, but could not collect a room list.");
+    }
+
+    return { buffer, filename, mime, boardError };
+  } finally {
+    await browser.close().catch(() => undefined);
+    await rm(downloadDir, { recursive: true, force: true }).catch(() => undefined);
   }
 }
 
@@ -91,9 +380,7 @@ export type SynxisBoardWriteResult = {
   error?: string;
 };
 
-/**
- * After login, open HK board and set listed rooms to Clean, then Save.
- */
+/** Mark Clean write-back: set rooms to Clean on the SynXis board. */
 export async function writeSynxisRoomsClean(input: {
   loginUrl: string;
   username: string;
@@ -104,12 +391,10 @@ export async function writeSynxisRoomsClean(input: {
 }): Promise<SynxisBoardWriteResult> {
   if (!input.roomNumbers.length) return { rooms: [] };
 
-  const loginUrl = normalizeLoginUrl(input.loginUrl);
   const selectors = mergeSelectors(input.selectorsJson);
   const timeout = input.timeoutMs ?? 60_000;
   const { chromium } = await loadPlaywright();
   const browser = await launchBrowser(chromium);
-
   const uniqueRooms = [...new Set(input.roomNumbers.map((r) => r.trim()).filter(Boolean))];
   const results: SynxisBoardWriteResult["rooms"] = [];
 
@@ -123,38 +408,13 @@ export async function writeSynxisRoomsClean(input: {
     const page = await context.newPage();
     page.setDefaultTimeout(timeout);
 
-    await page.goto(loginUrl, { waitUntil: "domcontentloaded", timeout });
-    const user = page.locator(selectors.username).first();
-    const pass = page.locator(selectors.password).first();
-    await user.waitFor({ state: "visible", timeout: 25_000 });
-    await user.fill(input.username);
-    await pass.fill(input.password);
-    const submit = page.locator(selectors.submit).first();
-    if ((await submit.count()) > 0) {
-      await submit.click({ timeout: 8_000 }).catch(() => pass.press("Enter"));
-    } else {
-      await pass.press("Enter");
-    }
-    await page.waitForLoadState("domcontentloaded", { timeout: 20_000 }).catch(() => undefined);
-    await new Promise((r) => setTimeout(r, 2000));
-
-    const stillLogin = await page.locator(selectors.password).first().isVisible().catch(() => false);
-    if (stillLogin) {
-      throw new Error("SynXis login failed — check username/password or MFA (portal write needs password-only login).");
-    }
-
-    if (selectors.boardUrl?.trim()) {
-      const board = selectors.boardUrl.trim();
-      const target = /^https?:\/\//i.test(board) ? board : new URL(board, loginUrl).toString();
-      await page.goto(target, { waitUntil: "domcontentloaded", timeout }).catch(() => undefined);
-    } else {
-      const hk = page.locator(selectors.housekeepingLink).first();
-      if ((await hk.count()) > 0) {
-        await hk.click({ timeout: 8_000 }).catch(() => undefined);
-        await page.waitForLoadState("domcontentloaded", { timeout: 15_000 }).catch(() => undefined);
-      }
-    }
-    await new Promise((r) => setTimeout(r, 1500));
+    await loginAndOpenBoard(page, {
+      loginUrl: input.loginUrl,
+      username: input.username,
+      password: input.password,
+      selectors,
+      timeout,
+    });
 
     for (const roomNumber of uniqueRooms) {
       try {
@@ -168,7 +428,6 @@ export async function writeSynxisRoomsClean(input: {
             let row: HTMLElement | null = null;
             for (const el of rows) {
               const text = normalize(el.innerText || el.textContent || "");
-              // Prefer compact rows that contain the room number as a token
               if (!text) continue;
               const parts = text.split(/[\s|/]+/);
               if (parts.includes(want) || text.startsWith(want + " ") || text.includes(" " + want + " ")) {
@@ -200,7 +459,6 @@ export async function writeSynxisRoomsClean(input: {
               return { ok: true };
             }
 
-            // Text fallback: click element whose label is Clean inside the row
             const labeled = Array.from(row.querySelectorAll("label, button, a, span")).find((n) =>
               /^\s*clean\s*$/i.test((n.textContent || "").trim())
             ) as HTMLElement | undefined;

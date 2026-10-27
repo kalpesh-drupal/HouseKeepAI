@@ -198,7 +198,7 @@ export async function runDuePmsSyncs() {
       continue;
     }
 
-    if (conn.portalEnabled && conn.provider === "SKYTOUCH") {
+    if (conn.portalEnabled && (conn.provider === "SKYTOUCH" || conn.provider === "SYNXIS")) {
       if (playwrightBlocked) {
         results.push({
           provider: conn.provider,
