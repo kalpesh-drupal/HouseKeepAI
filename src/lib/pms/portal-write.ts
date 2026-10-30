@@ -1,6 +1,8 @@
 import { PmsBoardCondition, PmsProvider, PmsSyncStatus, PmsWriteJobStatus } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { decryptSecret, encryptSecret } from "@/lib/crypto-secret";
+import { agentLog, shortenAgentError } from "@/lib/pms/agent-log";
+import { agentOwnsHotel } from "@/lib/pms/agent-fleet";
 import { writeSkyTouchBoardConditions } from "@/lib/pms/skytouch-portal";
 import { writeSynxisRoomsClean } from "@/lib/pms/synxis-portal";
 import type { ImapOtpConfig } from "@/lib/pms/email-otp";
@@ -280,10 +282,13 @@ async function processProviderWrites(opts: {
 
   const byHotel = new Map<string, typeof pending>();
   for (const job of pending) {
+    if (!agentOwnsHotel(job.hotelId)) continue;
     const list = byHotel.get(job.hotelId) || [];
     list.push(job);
     byHotel.set(job.hotelId, list);
   }
+  const ownedJobs = [...byHotel.values()].reduce((n, list) => n + list.length, 0);
+  if (!ownedJobs) return { hotels: 0, jobs: 0, updated: 0, failed: 0 };
 
   let updated = 0;
   let failed = 0;
@@ -395,7 +400,8 @@ async function processProviderWrites(opts: {
         },
       });
     } catch (err) {
-      const message = err instanceof Error ? err.message : "Portal write failed";
+      const message = shortenAgentError(err);
+      agentLog("step=write-back", `FAIL provider=${opts.provider} hotel=${hid} ${message}`);
       await prisma.pmsWriteJob.updateMany({
         where: { id: { in: jobIds }, status: PmsWriteJobStatus.RUNNING },
         data: { status: PmsWriteJobStatus.FAILED, lastError: message, completedAt: new Date() },
@@ -416,5 +422,5 @@ async function processProviderWrites(opts: {
     }
   }
 
-  return { hotels: byHotel.size, jobs: pending.length, updated, failed };
+  return { hotels: byHotel.size, jobs: ownedJobs, updated, failed };
 }

@@ -6,6 +6,7 @@ import { RoomStatus } from "@prisma/client";
 import { Loader2, Pencil, Plus, Trash2, X } from "lucide-react";
 import { RoomCell } from "./room-cell";
 import { ROOM_STATUS_CONFIG, cn } from "@/lib/utils";
+import { pmsFilterLabel, pmsStatusLabel, type PortalPms } from "@/lib/pms/pms-labels";
 
 type Room = {
   id: string;
@@ -44,10 +45,12 @@ export function HotelMap({
   rooms: initialRooms,
   floors: initialFloors,
   canEdit = false,
+  pmsProvider = null,
 }: {
   rooms: Room[];
   floors: number;
   canEdit?: boolean;
+  pmsProvider?: PortalPms;
 }) {
   const router = useRouter();
   const [rooms, setRooms] = useState(initialRooms);
@@ -233,7 +236,7 @@ export function HotelMap({
               editing && "opacity-50"
             )}
           >
-            {f.label}
+            {f.key === "dirty" || f.key === "clean" ? pmsFilterLabel(f.key, pmsProvider) : f.label}
           </button>
         ))}
 
@@ -357,7 +360,7 @@ export function HotelMap({
           {Object.entries(ROOM_STATUS_CONFIG).map(([key, config]) => (
             <div key={key} className="flex items-center gap-2">
               <span>{config.emoji}</span>
-              <span>{config.label}</span>
+              <span>{pmsStatusLabel(key as RoomStatus, pmsProvider)}</span>
             </div>
           ))}
         </div>
@@ -435,6 +438,7 @@ export function HotelMap({
                       arrivalDate={room.arrivalDate}
                       departureDate={room.departureDate}
                       doNotDisturb={room.doNotDisturb}
+                      pmsProvider={pmsProvider}
                     />
                   )
                 )}

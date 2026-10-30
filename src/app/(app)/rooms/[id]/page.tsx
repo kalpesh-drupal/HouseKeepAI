@@ -11,12 +11,14 @@ import { AssignHousekeeperSelect } from "@/components/assign-housekeeper-select"
 import Link from "next/link";
 import { ArrowLeft, Crown, Zap } from "lucide-react";
 import { RoomStayCue } from "@/components/room-stay-cue";
+import { activePortalProvider } from "@/lib/pms/active-provider";
+import { pmsRoomLabel } from "@/lib/pms/pms-labels";
 
 export default async function RoomDetailsPage({ params }: { params: Promise<{ id: string }> }) {
   const session = await requireAuth();
   const { id } = await params;
   const canAssign = canAssignHousekeepers(session.user.role);
-  const [room, housekeepers] = await Promise.all([
+  const [room, housekeepers, pmsProvider] = await Promise.all([
     getRoomById(id, session.user.hotelId),
     canAssign
       ? prisma.user.findMany({
@@ -25,6 +27,7 @@ export default async function RoomDetailsPage({ params }: { params: Promise<{ id
           orderBy: [{ role: "asc" }, { name: "asc" }],
         })
       : Promise.resolve([]),
+    activePortalProvider(session.user.hotelId),
   ]);
 
   if (!room) notFound();
@@ -57,7 +60,7 @@ export default async function RoomDetailsPage({ params }: { params: Promise<{ id
         </div>
         <div className={`rounded-2xl px-4 py-2 text-center ${statusConfig.bg}`}>
           <span className="text-2xl">{statusConfig.emoji}</span>
-          <p className={`font-semibold ${statusConfig.text}`}>{statusConfig.label}</p>
+          <p className={`font-semibold ${statusConfig.text}`}>{pmsRoomLabel(room.status, room.guestStatus, pmsProvider)}</p>
         </div>
       </div>
 

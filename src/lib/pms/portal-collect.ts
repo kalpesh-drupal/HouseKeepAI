@@ -42,7 +42,18 @@ export async function runPortalCollect(hotelId: string, provider: PmsProvider) {
   try {
     password = decryptSecret(connection.portalPasswordEnc);
   } catch {
-    throw new Error("Could not decrypt the stored portal password. Re-save it on the PMS page.");
+    const message = "Could not decrypt the stored portal password. Re-save it on the PMS page.";
+    await prisma.pmsSyncLog.create({
+      data: {
+        hotelId,
+        provider,
+        action: "PORTAL_COLLECT",
+        records: 0,
+        status: PmsSyncStatus.FAILED,
+        message,
+      },
+    });
+    throw new Error(message);
   }
 
   const { assertPlaywrightHost } = await import("@/lib/pms/playwright-host");

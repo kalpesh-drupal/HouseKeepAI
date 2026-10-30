@@ -1,18 +1,22 @@
 import { requireAuth } from "@/lib/session";
 import { prisma } from "@/lib/prisma";
 import { HotelMap } from "@/components/hotel-map";
+import { activePortalProvider } from "@/lib/pms/active-provider";
 import { canEditRoomInventory } from "@/lib/room-inventory";
 import Link from "next/link";
 
 export default async function MapPage() {
   const session = await requireAuth();
   const canEdit = canEditRoomInventory(session.user.role);
-  const hotel = await prisma.hotel.findUnique({ where: { id: session.user.hotelId } });
-  const rooms = await prisma.room.findMany({
-    where: { hotelId: session.user.hotelId },
-    include: { housekeeper: { select: { name: true } } },
-    orderBy: [{ floor: "asc" }, { number: "asc" }],
-  });
+  const [hotel, rooms, pmsProvider] = await Promise.all([
+    prisma.hotel.findUnique({ where: { id: session.user.hotelId } }),
+    prisma.room.findMany({
+      where: { hotelId: session.user.hotelId },
+      include: { housekeeper: { select: { name: true } } },
+      orderBy: [{ floor: "asc" }, { number: "asc" }],
+    }),
+    activePortalProvider(session.user.hotelId),
+  ]);
 
   return (
     <div className="space-y-6">
@@ -41,6 +45,7 @@ export default async function MapPage() {
         }))}
         floors={hotel?.floors ?? 3}
         canEdit={canEdit}
+        pmsProvider={pmsProvider}
       />
     </div>
   );

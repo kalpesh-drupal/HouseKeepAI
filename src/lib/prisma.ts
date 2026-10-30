@@ -13,8 +13,11 @@ function databaseUrl() {
     if (!u.searchParams.has("connect_timeout")) u.searchParams.set("connect_timeout", "30");
     if (!u.searchParams.has("pool_timeout")) u.searchParams.set("pool_timeout", "30");
     if (!u.searchParams.has("socket_timeout")) u.searchParams.set("socket_timeout", "60");
-    // Dev: small pool so a dropped proxy connection recovers faster
-    if (process.env.NODE_ENV !== "production" && !u.searchParams.has("connection_limit")) {
+    // Each Vercel instance keeps one connection. A Postgres pooler in front of
+    // the database is what lets a thousand properties share one server.
+    if (process.env.VERCEL && !u.searchParams.has("connection_limit")) {
+      u.searchParams.set("connection_limit", "1");
+    } else if (process.env.NODE_ENV !== "production" && !u.searchParams.has("connection_limit")) {
       u.searchParams.set("connection_limit", "5");
     }
     return u.toString();

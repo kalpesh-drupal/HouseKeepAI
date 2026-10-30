@@ -10,12 +10,14 @@ import { MobileRoomActions } from "@/components/mobile-room-actions";
 import { CleaningTimer } from "@/components/cleaning-timer";
 import { ReadyToInspectList } from "@/components/ready-to-inspect-list";
 import { RoomStayCue } from "@/components/room-stay-cue";
+import { activePortalProvider } from "@/lib/pms/active-provider";
+import { pmsRoomLabel } from "@/lib/pms/pms-labels";
 
 export default async function HousekeepingPage() {
   const session = await requireAuth();
   const canAssign = canAssignHousekeepers(session.user.role);
   const canInspect = canInspectRooms(session.user.role);
-  const [rooms, housekeepers, readyRooms] = await Promise.all([
+  const [rooms, housekeepers, readyRooms, pmsProvider] = await Promise.all([
     getRoomsForUser(session.user.hotelId, session.user.id, session.user.role),
     canAssign
       ? prisma.user.findMany({
@@ -25,6 +27,7 @@ export default async function HousekeepingPage() {
         })
       : Promise.resolve([]),
     canInspect ? getRoomsReadyToInspect(session.user.hotelId) : Promise.resolve([]),
+    activePortalProvider(session.user.hotelId),
   ]);
   const myRooms =
     session.user.role === "HOUSEKEEPER"
@@ -44,6 +47,7 @@ export default async function HousekeepingPage() {
 
       {canAssign && (
         <RoomAssignmentBoard
+          pmsProvider={pmsProvider}
           rooms={rooms.map((room) => ({
             id: room.id,
             number: room.number,
@@ -115,7 +119,7 @@ export default async function HousekeepingPage() {
                         />
                       </Link>
                       <span className={`rounded-full px-2 py-1 text-xs font-medium ${config.bg} ${config.text}`}>
-                        HK: {config.label}
+                        HK: {pmsRoomLabel(room.status, room.guestStatus, pmsProvider)}
                       </span>
                       <span className={`rounded-full px-2 py-1 text-xs font-medium ${guestStayLabel(room.guestStatus, room.status).className}`}>
                         {guestStayLabel(room.guestStatus, room.status).label}

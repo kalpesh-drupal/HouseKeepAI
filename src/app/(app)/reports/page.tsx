@@ -1,16 +1,20 @@
 import { requireAuth } from "@/lib/session";
 import { getReportData } from "@/lib/queries";
 import { ExportButtons } from "@/components/export-buttons";
-import { UserRole } from "@prisma/client";
+import { RoomStatus, UserRole } from "@prisma/client";
 import { StatCard } from "@/components/stat-card";
 import { GUEST_STAY_CONFIG, ROOM_STATUS_CONFIG } from "@/lib/utils";
+import { activePortalProvider } from "@/lib/pms/active-provider";
+import { pmsRoomLabel, pmsStatusLabel, type PortalPms } from "@/lib/pms/pms-labels";
 import { formatDuration } from "@/lib/business-day";
 import Link from "next/link";
 
 type Period = "day" | "month" | "year";
 
-function statusLabel(status: string) {
-  return ROOM_STATUS_CONFIG[status as keyof typeof ROOM_STATUS_CONFIG]?.label ?? status;
+function statusLabel(status: string, provider: PortalPms, guestStatus?: string | null) {
+  const key = status as RoomStatus;
+  if (!ROOM_STATUS_CONFIG[key]) return status;
+  return guestStatus === undefined ? pmsStatusLabel(key, provider) : pmsRoomLabel(key, guestStatus, provider);
 }
 
 function guestLabel(status: string) {
@@ -29,11 +33,14 @@ export default async function ReportsPage({
   ]);
   const params = await searchParams;
   const period: Period = params.period === "month" || params.period === "year" ? params.period : "day";
-  const data = await getReportData(session.user.hotelId, {
-    period,
-    date: params.date,
-    employeeId: params.employee,
-  });
+  const [data, pmsProvider] = await Promise.all([
+    getReportData(session.user.hotelId, {
+      period,
+      date: params.date,
+      employeeId: params.employee,
+    }),
+    activePortalProvider(session.user.hotelId),
+  ]);
 
   const periods: { key: Period; label: string }[] = [
     { key: "day", label: "Day" },
@@ -60,7 +67,7 @@ export default async function ReportsPage({
       Type: "Room",
       Date: row.date,
       Name: row.roomNumber,
-      Detail: `${statusLabel(row.status)} / ${guestLabel(row.guestStatus)}${row.doNotDisturb ? " / DND" : ""}`,
+      Detail: `${statusLabel(row.status, pmsProvider, row.guestStatus)} / ${guestLabel(row.guestStatus)}${row.doNotDisturb ? " / DND" : ""}`,
       Minutes: "",
       Average: row.housekeeperName || "",
     })),
@@ -127,7 +134,7 @@ export default async function ReportsPage({
         <StatCard
           title={period === "day" ? "Rooms" : "Room-days"}
           value={data.roomCount}
-          subtitle={data.statusCounts.map((item) => `${item.count} ${statusLabel(item.status)}`).join(" · ") || "No rooms saved"}
+          subtitle={data.statusCounts.map((item) => `${item.count} ${statusLabel(item.status, pmsProvider)}`).join(" · ") || "No rooms saved"}
         />
         <StatCard title="Cleans finished" value={data.cleansFinished} subtitle="Marked clean or ready to inspect" variant="success" />
         <StatCard title="Avg cleaning time" value={`${data.avgCleaningTime}m`} subtitle="Finished cleans in this period" />
@@ -198,7 +205,7 @@ export default async function ReportsPage({
                     <tr key={`${row.date}-${row.roomNumber}`} className="border-t border-border">
                       <td className="py-2 pr-4 font-medium">{row.roomNumber}</td>
                       <td className="py-2 pr-4">
-                        {statusLabel(row.status)}
+                        {statusLabel(row.status, pmsProvider, row.guestStatus)}
                         {row.doNotDisturb ? " · DND" : ""}
                       </td>
                       <td className="py-2 pr-4">{guestLabel(row.guestStatus)}</td>

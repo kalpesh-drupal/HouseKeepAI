@@ -24,6 +24,8 @@ import {
 } from "lucide-react";
 import { ROLE_LABELS, canAssignHousekeepers } from "@/lib/utils";
 import { formatFlashCollectedAt } from "@/lib/pms/flash-stats";
+import { activePortalProvider } from "@/lib/pms/active-provider";
+import { pmsChartName, pmsFilterLabel, pmsPortalName, type PortalPms } from "@/lib/pms/pms-labels";
 import Link from "next/link";
 import { UserRole } from "@prisma/client";
 
@@ -34,9 +36,10 @@ function flashValue(value: number | null | undefined, suffix = "") {
 
 export default async function DashboardPage() {
   const session = await requireAuth();
-  const [stats, ai] = await Promise.all([
+  const [stats, ai, portal] = await Promise.all([
     getDashboardStats(session.user.hotelId),
     buildAiInsights(session.user.hotelId),
+    activePortalProvider(session.user.hotelId),
   ]);
 
   const canImport = (
@@ -51,6 +54,9 @@ export default async function DashboardPage() {
   const flash = stats.pmsFlash;
   const flashAt = formatFlashCollectedAt(flash?.collectedAt || stats.pmsFlashAt?.toISOString());
   const flashProvider = stats.pmsFlashProvider;
+  const labelProvider: PortalPms =
+    portal ?? (flashProvider === "SYNXIS" || flashProvider === "SKYTOUCH" ? flashProvider : null);
+  const portalName = pmsPortalName(labelProvider);
   const isSynxisFlash = flashProvider === "SYNXIS";
   const flashTitle = isSynxisFlash
     ? "Today from SynXis Room Status"
@@ -64,6 +70,7 @@ export default async function DashboardPage() {
         <h1 className="text-3xl font-bold">Dashboard</h1>
         <p className="text-muted-foreground">
           Welcome back, {session.user.name} · {ROLE_LABELS[session.user.role]}
+          {portalName ? ` · ${portalName} words` : ""}
         </p>
       </div>
 
@@ -251,10 +258,10 @@ export default async function DashboardPage() {
           <StatCard title="Today's Departures" value={stats.departures} icon={LogOut} href="/map?filter=departure" />
         )}
         {flash?.vacantDirtyRemaining == null && flash?.vacantDirty == null && (
-          <StatCard title="Dirty" value={stats.vacantDirty} icon={Sparkles} variant="danger" href="/map?filter=dirty" />
+          <StatCard title={pmsFilterLabel("dirty", labelProvider)} value={stats.vacantDirty} icon={Sparkles} variant="danger" href="/map?filter=dirty" />
         )}
         {flash?.vacantClean == null && (
-          <StatCard title="Clean" value={stats.vacantClean} icon={CheckCircle} variant="success" href="/map?filter=clean" />
+          <StatCard title={pmsFilterLabel("clean", labelProvider)} value={stats.vacantClean} icon={CheckCircle} variant="success" href="/map?filter=clean" />
         )}
         {flash?.ooo == null && (
           <StatCard title="Out of Order" value={stats.outOfOrder} icon={Ban} variant="warning" />
@@ -268,13 +275,13 @@ export default async function DashboardPage() {
 
       <div className="grid gap-6 lg:grid-cols-2 xl:grid-cols-3">
         <ChartCard title="Cleaning Progress">
-          <CleaningProgressChart data={stats.charts.cleaningProgress} />
+          <CleaningProgressChart data={stats.charts.cleaningProgress.map((row) => ({ ...row, name: pmsChartName(row.name, labelProvider) }))} />
         </ChartCard>
         <ChartCard title="Maintenance Status">
           <MaintenanceChart data={stats.charts.maintenanceStatus} />
         </ChartCard>
         <ChartCard title="Room Status">
-          <RoomStatusChart data={stats.charts.roomStatus} />
+          <RoomStatusChart data={stats.charts.roomStatus.map((row) => ({ ...row, name: pmsChartName(row.name, labelProvider) }))} />
         </ChartCard>
         <ChartCard title="Average Cleaning Time">
           <MetricChart title="Minutes per room today" value={stats.charts.avgCleaningTime} unit="minutes" />

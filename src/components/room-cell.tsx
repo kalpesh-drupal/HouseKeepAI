@@ -1,6 +1,7 @@
 import { RoomStatus } from "@prisma/client";
 import Link from "next/link";
 import { ROOM_STATUS_CONFIG, cn } from "@/lib/utils";
+import { pmsRoomLabel, type PortalPms } from "@/lib/pms/pms-labels";
 import { changeBeddingDue, type StayDate } from "@/lib/stay";
 
 interface RoomCellProps {
@@ -16,6 +17,7 @@ interface RoomCellProps {
   arrivalDate?: StayDate;
   departureDate?: StayDate;
   doNotDisturb?: boolean;
+  pmsProvider?: PortalPms;
 }
 
 export function RoomCell({
@@ -31,13 +33,16 @@ export function RoomCell({
   arrivalDate,
   departureDate,
   doNotDisturb,
+  pmsProvider = null,
 }: RoomCellProps) {
   const config = ROOM_STATUS_CONFIG[status];
+  const label = pmsRoomLabel(status, guestStatus, pmsProvider);
   const bedding = changeBeddingDue(guestStatus, arrivalDate, departureDate);
 
   return (
     <Link
       href={`/rooms/${id}`}
+      title={label}
       className={cn(
         "group relative flex flex-col items-center justify-center rounded-xl border-2 border-transparent transition hover:scale-105 hover:border-primary hover:shadow-lg",
         config.bg,
@@ -54,7 +59,7 @@ export function RoomCell({
       ) : (
         <>
           <span className="text-xs">{config.emoji}</span>
-          <span className="mt-0.5 text-[10px] font-medium text-muted-foreground">{config.label}</span>
+          <span className="mt-0.5 text-[10px] font-medium text-muted-foreground">{label}</span>
         </>
       )}
       {assignee ? (

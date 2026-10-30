@@ -11,6 +11,8 @@ import { CleaningTimer } from "@/components/cleaning-timer";
 import Link from "next/link";
 import { ArrowLeft } from "lucide-react";
 import { RoomStayCue } from "@/components/room-stay-cue";
+import { activePortalProvider } from "@/lib/pms/active-provider";
+import { pmsRoomLabel } from "@/lib/pms/pms-labels";
 
 const LINEN_CATEGORIES = ["Towels", "Pillows", "Sheets", "Blankets"];
 
@@ -26,7 +28,10 @@ export default async function MobileRoomPage({
   const session = await requireAuth(undefined, "/login?callbackUrl=/m");
   const { id } = await params;
   const query = await searchParams;
-  const room = await getRoomById(id, session.user.hotelId);
+  const [room, pmsProvider] = await Promise.all([
+    getRoomById(id, session.user.hotelId),
+    activePortalProvider(session.user.hotelId),
+  ]);
   if (!room) notFound();
   const cfg = ROOM_STATUS_CONFIG[room.status];
   const amenities = await prisma.inventoryItem.findMany({
@@ -63,7 +68,7 @@ export default async function MobileRoomPage({
             />
           </div>
         </div>
-        <span className={`rounded-full px-2 py-1 text-xs ${cfg.bg}`}>{cfg.label}</span>
+        <span className={`rounded-full px-2 py-1 text-xs ${cfg.bg}`}>{pmsRoomLabel(room.status, room.guestStatus, pmsProvider)}</span>
       </div>
       <p className="text-sm text-muted-foreground">
         Guest: {room.guestName || "—"} · {guestStayLabel(room.guestStatus, room.status).label} · HK: {room.housekeeper?.name || "Unassigned"} · Est. {room.estimatedMinutes} min

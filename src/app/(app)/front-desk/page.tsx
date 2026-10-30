@@ -4,21 +4,26 @@ import { prisma } from "@/lib/prisma";
 import Link from "next/link";
 import { guestStayLabel, ROOM_STATUS_CONFIG } from "@/lib/utils";
 import { FrontDeskActions } from "@/components/front-desk-actions";
+import { activePortalProvider } from "@/lib/pms/active-provider";
+import { pmsFilterLabel, pmsRoomLabel } from "@/lib/pms/pms-labels";
 
 export default async function FrontDeskPage() {
   const session = await requireAuth();
-  const [data, allRooms] = await Promise.all([
+  const [data, allRooms, pmsProvider] = await Promise.all([
     getFrontDeskData(session.user.hotelId),
     prisma.room.findMany({
       where: { hotelId: session.user.hotelId },
       select: { id: true, number: true },
       orderBy: { number: "asc" },
     }),
+    activePortalProvider(session.user.hotelId),
   ]);
 
+  const cleanWord = pmsFilterLabel("clean", pmsProvider);
+  const dirtyWord = pmsFilterLabel("dirty", pmsProvider);
   const sections = [
-    { title: "Clean Rooms", rooms: data.cleanRooms },
-    { title: "Dirty Rooms", rooms: data.dirtyRooms },
+    { title: `${cleanWord} Rooms`, rooms: data.cleanRooms },
+    { title: `${dirtyWord} Rooms`, rooms: data.dirtyRooms },
     { title: "Expected Arrivals", rooms: data.arrivals },
     { title: "Expected Departures", rooms: data.departures },
     { title: "Rush Rooms", rooms: data.rushRooms },
@@ -30,7 +35,11 @@ export default async function FrontDeskPage() {
         <h1 className="text-3xl font-bold">Front Desk</h1>
         <p className="text-muted-foreground">
           Mark clean or dirty, VIP, rush, move, block, or out of order — without leaving this screen.
-          Mark clean also queues SkyTouch Ready when portal sync is on.
+          {pmsProvider === "SYNXIS"
+            ? " Mark clean also queues SynXis Clean when portal sync is on."
+            : pmsProvider === "SKYTOUCH"
+              ? " Mark clean also queues SkyTouch Ready when portal sync is on."
+              : " Mark clean also queues the hotel PMS when portal sync is on."}
         </p>
       </div>
 
@@ -50,7 +59,7 @@ export default async function FrontDeskPage() {
                         {room.isVip ? " ★" : ""}
                         {room.isRush ? " ⚡" : ""}
                       </Link>
-                      <span className="text-xs">{ROOM_STATUS_CONFIG[room.status].label}</span>
+                      <span className="text-xs">{pmsRoomLabel(room.status, room.guestStatus, pmsProvider)}</span>
                     </div>
                     <p className={`mt-1 inline-block rounded-full px-2 py-0.5 text-xs font-medium ${guestStayLabel(room.guestStatus, room.status).className}`}>
                       {guestStayLabel(room.guestStatus, room.status).label}

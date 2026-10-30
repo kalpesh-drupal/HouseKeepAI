@@ -4,6 +4,7 @@ import { tmpdir } from "os";
 import { randomUUID } from "crypto";
 import { housekeepingCheckOffToCsv } from "@/lib/pdf-hk";
 import type { PmsFlashStats } from "@/lib/pms/flash-stats";
+import { agentLog, agentStep, shortenAgentError } from "@/lib/pms/agent-log";
 import { assertPlaywrightHost, playwrightLaunchExtras } from "@/lib/pms/playwright-host";
 
 export type PortalSelectors = {
@@ -212,8 +213,8 @@ async function launchBrowser(chromium: Awaited<ReturnType<typeof loadPlaywright>
     try {
       return await launchBundled();
     } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      throw new Error(`Could not start bundled Chromium for SkyTouch (${message}).`);
+      agentLog("step=browser-launch", `FAIL ${shortenAgentError(err)}`);
+      throw new Error(`browser-launch: ${shortenAgentError(err)}`);
     }
   }
 
@@ -242,120 +243,40 @@ async function launchBrowser(chromium: Awaited<ReturnType<typeof loadPlaywright>
   }
 }
 
-function reportTargets(root: DomRoot) {
-  return [
-    root.getByRole("option", { name: /housekeeping check-?\s*off/i }),
-    root.getByRole("link", { name: /housekeeping check-?\s*off/i }),
-    root.getByRole("treeitem", { name: /housekeeping check-?\s*off/i }),
-    root.getByRole("row", { name: /housekeeping check-?\s*off/i }),
-    root.getByText(/housekeeping check-?\s*off list/i),
-    root.getByText(/housekeeping check-?\s*off/i),
-    root.locator("a, option, label, td, li, span, div, tr").filter({ hasText: /housekeeping check-?\s*off/i }),
-  ];
+const CHECK_OFF_LIST = /^\s*housekeeping check-?\s*off list\s*$/i;
+
+function rootsOf(page: import("playwright").Page): DomRoot[] {
+  return [page, ...page.frames()];
 }
 
-async function listVisibleReportNames(root: DomRoot) {
-  const names = await root
-    .evaluate(() => {
-      const text = (document.body?.innerText || "")
-        .split(/\n+/)
-        .map((line) => line.replace(/\s+/g, " ").trim())
-        .filter((line) => line.length > 3 && line.length < 80);
-      return text.filter((line) => /housekeep|check-?\s*off|report/i.test(line)).slice(0, 12);
-    })
-    .catch(() => [] as string[]);
-  return names;
+/** Click the Housekeeping Check-Off List row. A single click, then Submit runs it. */
+async function clickHousekeepingCheckOffList(page: import("playwright").Page) {
+  for (const root of rootsOf(page)) {
+    const clicked = await clickFirstMatching([
+      root.getByRole("link", { name: CHECK_OFF_LIST }),
+      root.getByRole("button", { name: CHECK_OFF_LIST }),
+      root.getByRole("treeitem", { name: CHECK_OFF_LIST }),
+      root.getByRole("option", { name: CHECK_OFF_LIST }),
+      root.getByRole("row", { name: CHECK_OFF_LIST }),
+      root.locator("a, button, option, td, span, li").filter({ hasText: CHECK_OFF_LIST }),
+    ]);
+    if (clicked) return true;
+  }
+  return false;
 }
 
-async function selectHousekeepingReport(root: DomRoot) {
-  // Try typing into a report search box on Enterprise Reporting.
-  const search = root
-    .locator(
-      'input[type="search"], input[name*="search" i], input[id*="search" i], input[placeholder*="search" i], input[placeholder*="report" i], input[placeholder*="Find" i]'
-    )
-    .first();
-  if ((await search.count()) > 0 && (await search.isVisible().catch(() => false))) {
-    await search.fill("Check-Off").catch(() => undefined);
-    await search.press("Enter").catch(() => undefined);
-    await new Promise((resolve) => setTimeout(resolve, 1000));
+/** SkyTouch report criteria pages run when Submit is clicked. */
+async function clickReportSubmit(page: import("playwright").Page) {
+  for (const root of rootsOf(page)) {
+    const clicked = await clickFirstMatching([
+      root.getByRole("button", { name: /^\s*submit\s*$/i }),
+      root.locator('input[type="submit"][value="Submit" i], input[name="submit"][value="Submit" i]'),
+      root.locator('input[type="submit"], button').filter({ hasText: /^\s*submit\s*$/i }),
+      root.getByText(/^\s*submit\s*$/i),
+    ]);
+    if (clicked) return true;
   }
-
-  const selects = root.locator("select");
-  const selectCount = await selects.count();
-  for (let i = 0; i < selectCount; i++) {
-    const select = selects.nth(i);
-    const options = await select.locator("option").allTextContents();
-    const match =
-      options.find((label) => /housekeeping check-?\s*off|check-?\s*off list/i.test(label)) ||
-      options.find((label) => /housekeeping/i.test(label));
-    if (match) {
-      await select.selectOption({ label: match }).catch(async () => {
-        const value = await select.locator("option", { hasText: match }).first().getAttribute("value");
-        if (value) await select.selectOption(value);
-      });
-      return true;
-    }
-  }
-
-  for (const candidate of reportTargets(root)) {
-    const target = candidate.first();
-    try {
-      if ((await target.count()) === 0) continue;
-      if (!(await target.isVisible().catch(() => false))) continue;
-      await target.click({ timeout: 5_000 });
-      await target.dblclick({ timeout: 5_000 }).catch(() => undefined);
-      return true;
-    } catch {
-      // try next
-    }
-  }
-
-  return clickFirstMatching([
-    root.getByRole("link", { name: /housekeeping/i }),
-    root.getByText(/^\s*housekeeping\s*$/i),
-  ]);
-}
-
-async function runSelectedReport(page: import("playwright").Page, context: import("playwright").BrowserContext) {
-  const runControls = [
-    page.getByRole("button", { name: /^\s*submit\s*$/i }),
-    page.getByText(/^\s*submit\s*$/i),
-    page.locator('input[type="submit"]'),
-    page.locator('input[value*="Submit" i], button:has-text("Submit")'),
-    page.getByRole("button", { name: /^(view|run|go|display|generate|ok)$/i }),
-    page.getByRole("link", { name: /^(view|run|go|display|generate)$/i }),
-    page.locator('input[value*="View" i], input[value*="Run" i], input[value*="Go" i], input[value*="Display" i]'),
-  ];
-
-  // Also look for Submit inside iframes on EnterpriseReporting.
-  for (const frame of page.frames()) {
-    runControls.push(
-      frame.getByRole("button", { name: /^\s*submit\s*$/i }),
-      frame.locator('input[type="submit"], input[value*="Submit" i], button:has-text("Submit")')
-    );
-  }
-
-  const popupPromise = context.waitForEvent("page", { timeout: 25_000 }).catch(() => null);
-  const clicked = await clickFirstMatching(runControls);
-  if (!clicked) {
-    await page.evaluate(() => {
-      const form = document.querySelector("form");
-      if (!form) return;
-      if (typeof form.requestSubmit === "function") form.requestSubmit();
-      else form.submit();
-    });
-  }
-
-  const popup = await popupPromise;
-  if (popup) {
-    await popup.waitForLoadState("domcontentloaded", { timeout: 30_000 }).catch(() => undefined);
-    await new Promise((resolve) => setTimeout(resolve, 2500));
-    return popup;
-  }
-
-  await page.waitForLoadState("domcontentloaded", { timeout: 30_000 }).catch(() => undefined);
-  await new Promise((resolve) => setTimeout(resolve, 2500));
-  return page;
+  return false;
 }
 
 async function countRoomNumberHits(page: import("playwright").Page) {
@@ -460,22 +381,42 @@ async function openSkyTouchCheckOffReport(
   context: import("playwright").BrowserContext,
   selectors: Required<PortalSelectors>
 ) {
-  await clickFirstMatching([
-    page.getByRole("link", { name: /enterprise reporting|reports?/i }),
-    page.getByText(/enterprise reporting/i),
-    page.getByText(/^\s*reports?\s*$/i),
-    page.locator(selectors.reportsLink),
-  ]);
-  await new Promise((resolve) => setTimeout(resolve, 1500));
-
-  let selected = false;
-  for (const frame of page.frames()) {
-    selected = await selectHousekeepingReport(frame).catch(() => false);
-    if (selected) break;
+  if (!/report/i.test(page.url())) {
+    await clickFirstMatching([
+      page.getByRole("link", { name: /enterprise reporting|^reports?$/i }),
+      page.getByText(/enterprise reporting/i),
+      page.getByText(/^\s*reports?\s*$/i),
+      page.locator(selectors.reportsLink),
+    ]);
+    await new Promise((resolve) => setTimeout(resolve, 1200));
   }
-  if (!selected) selected = await selectHousekeepingReport(page);
-  await new Promise((resolve) => setTimeout(resolve, 1500));
-  return runSelectedReport(page, context);
+
+  let reportPopup: import("playwright").Page | null = null;
+  const onPopup = (next: import("playwright").Page) => {
+    reportPopup = next;
+  };
+  context.on("page", onPopup);
+  try {
+    const picked = await clickHousekeepingCheckOffList(page);
+    console.info("check-off: list-clicked", picked, page.url());
+    await new Promise((resolve) => setTimeout(resolve, 800));
+    const criteria = reportPopup ?? page;
+    const submitted = await clickReportSubmit(criteria);
+    console.info("check-off: submit-clicked", submitted, criteria.url());
+    const started = Date.now();
+    while (Date.now() - started < 20_000) {
+      const candidate = reportPopup ?? criteria;
+      await candidate.waitForLoadState("domcontentloaded", { timeout: 2_000 }).catch(() => undefined);
+      const text = await readCheckOffTextFromContext(context, candidate);
+      const csv = text ? housekeepingCheckOffToCsv(text) : null;
+      const rooms = csv ? csv.split(/\n/).filter((line) => /^\d{3,4},/.test(line)).length : 0;
+      if (rooms >= 3) return candidate;
+      await new Promise((resolve) => setTimeout(resolve, 700));
+    }
+    return reportPopup ?? criteria;
+  } finally {
+    context.off("page", onPopup);
+  }
 }
 
 type BoardRoom = {
@@ -552,31 +493,31 @@ async function extractHousekeepingCenterBoard(root: DomRoot): Promise<BoardRoom[
   // or encoded on .UBcontainer[tablesort_sortvalue=R|C|D].
   const parsed = await root
     .evaluate(() => {
-      type Row = {
-        roomNumber: string;
-        status: string;
-        guestStatus: string;
-        notes: string;
-      };
-      const clean = (value: string) => value.replace(/\s+/g, " ").trim();
-      const out: Row[] = [];
+      const out: Array<{ roomNumber: string; status: string; guestStatus: string; notes: string }> = [];
 
       const table =
         document.querySelector("#updateRoomConditionDataTable") ||
         document.querySelector("tbody#updateRoomConditionDataTable") ||
         null;
-      const trs = table
-        ? Array.from(table.querySelectorAll("tr[index], tr"))
-        : Array.from(document.querySelectorAll("tr")).filter((tr) =>
-            tr.querySelector("a[onclick*='showHistoricalRoomCondition']")
-          );
+      const allRows = Array.from(document.querySelectorAll("tr"));
+      const linked: Element[] = [];
+      for (const tr of allRows) {
+        if (tr.querySelector("a[onclick*='showHistoricalRoomCondition']")) linked.push(tr);
+      }
+      let trs: Element[] = [];
+      if (table) {
+        for (const tr of Array.from(table.querySelectorAll("tr[index], tr"))) {
+          if (tr.querySelector("a[onclick*='showHistoricalRoomCondition']")) trs.push(tr);
+        }
+      }
+      if (trs.length < 3) trs = linked;
 
       for (const tr of trs) {
         const link =
           tr.querySelector<HTMLAnchorElement>("a[onclick*='showHistoricalRoomCondition']") ||
           tr.querySelector<HTMLAnchorElement>("a.CHI_Link");
         const fromClick = link?.getAttribute("onclick")?.match(/showHistoricalRoomCondition\('(\d{3,4})'/)?.[1];
-        const roomNumber = fromClick || clean(link?.textContent || "");
+        const roomNumber = fromClick || (link?.textContent || "").replace(/\s+/g, " ").trim();
         if (!/^\d{3,4}$/.test(roomNumber)) continue;
 
         const condCell = tr.querySelector(".UBcontainer");
@@ -591,18 +532,16 @@ async function extractHousekeepingCenterBoard(root: DomRoot): Promise<BoardRoom[
 
         const hkSelect = tr.querySelector<HTMLSelectElement>("select.hk-status-dropdown");
         const hkInitial = (hkSelect?.getAttribute("data-initial") || hkSelect?.value || "").toUpperCase();
-        const roomStatusText = clean(
-          tr.querySelector("td p.CHI_Data:not(.CHI_State_NoWrap)")?.textContent ||
-            Array.from(tr.querySelectorAll("p.CHI_Data"))
-              .map((p) => clean(p.textContent || ""))
-              .find((t) => /^(vacant|occupied)$/i.test(t)) ||
-            ""
-        );
-        const serviceText = clean(
-          Array.from(tr.querySelectorAll("p.CHI_Data"))
-            .map((p) => clean(p.textContent || ""))
-            .find((t) => /\b(stay\s*over|depart|arriv|due\s*out|none)\b/i.test(t)) || ""
-        );
+        let roomStatusText = (tr.querySelector("td p.CHI_Data:not(.CHI_State_NoWrap)")?.textContent || "")
+          .replace(/\s+/g, " ")
+          .trim();
+        let serviceText = "";
+        const paras = tr.querySelectorAll("p.CHI_Data");
+        for (let i = 0; i < paras.length; i++) {
+          const t = (paras[i].textContent || "").replace(/\s+/g, " ").trim();
+          if (!roomStatusText && /^(vacant|occupied)$/i.test(t)) roomStatusText = t;
+          if (!serviceText && /\b(stay\s*over|depart|arriv|due\s*out|none)\b/i.test(t)) serviceText = t;
+        }
 
         let guestStatus = "";
         if (/\bstay\s*over\b/i.test(serviceText)) guestStatus = "Stayover";
@@ -631,7 +570,13 @@ async function extractHousekeepingCenterBoard(root: DomRoot): Promise<BoardRoom[
       }
       return out;
     })
-    .catch(() => [] as BoardRoom[]);
+    .catch((err) => {
+      console.info(
+        "BOARD_EVAL_ERR",
+        err instanceof Error ? err.message.split("\n")[0] : String(err)
+      );
+      return [] as BoardRoom[];
+    });
 
   const byRoom = new Map<string, BoardRoom>();
   for (const row of parsed) {
@@ -906,8 +851,8 @@ async function readHomeFlashFromContext(
  * Secure collect-only SkyTouch portal agent.
  * 1) Login
  * 2) Read Welcome/Home flash stats (occupancy, ADR, arrivals, …)
- * 3) Open Housekeeping Center and read the live board
- * 4) Open Housekeeping Check-Off List and double-check room status
+ * 3) Home → Housekeeping Center and read that board
+ * 4) If the board is thin, Reports → Housekeeping Check-Off List → Submit, then read the report that opens
  * Does not write status back to the PMS.
  */
 export async function collectSkyTouchHousekeepingReport(input: {
@@ -995,25 +940,23 @@ export async function collectSkyTouchHousekeepingReport(input: {
         if (board.length >= 3) break;
         await new Promise((resolve) => setTimeout(resolve, 1500));
       }
+      let checkOffText: string | null = null;
       if (board.length < 3) {
-        const roomHits = await countRoomNumberHits(page);
-        boardError =
-          `Could not read the Housekeeping Center board yet (saw ${roomHits} room numbers, parsed ${board.length} with status).`;
-      } else {
-        let checkOffText: string | null = null;
         try {
           const reportPage = await openSkyTouchCheckOffReport(page, context, selectors);
-          for (let attempt = 0; attempt < 4; attempt++) {
-            checkOffText = await readCheckOffTextFromContext(context, reportPage);
-            if (checkOffText) break;
-            await new Promise((resolve) => setTimeout(resolve, 1500));
-          }
+          checkOffText = await readCheckOffTextFromContext(context, reportPage);
         } catch {
           checkOffText = null;
         }
+      }
+      if (board.length >= 3 || checkOffText) {
         const csv = mergeBoardWithCheckOff(board, checkOffText);
         buffer = Buffer.from(csv, "utf8");
         filename = `skytouch-board-${Date.now()}.csv`;
+      } else {
+        const roomHits = await countRoomNumberHits(page);
+        boardError =
+          `Housekeeping Center parsed ${board.length} rooms (saw ${roomHits} room numbers), and Housekeeping Check-Off List did not open a report to read.`;
       }
     } catch (err) {
       boardError = err instanceof Error ? err.message : "Housekeeping Center collect failed";
@@ -1176,6 +1119,8 @@ export async function writeSkyTouchBoardConditions(input: {
   if (!input.updates.length) return { rooms: [] };
 
   const loginUrl = normalizeSkyTouchLoginUrl(input.loginUrl);
+  const roomsLabel = input.updates.map((row) => row.roomNumber).join(",");
+  agentLog("step=write", `start rooms=${roomsLabel} url=${loginUrl}`);
   const { chromium } = await loadPlaywright();
   const selectors = mergeSelectors(input.selectorsJson);
   const timeout = input.timeoutMs ?? 60_000;
@@ -1191,36 +1136,49 @@ export async function writeSkyTouchBoardConditions(input: {
     const page = await context.newPage();
     page.setDefaultTimeout(timeout);
 
-    await page.goto(loginUrl, { waitUntil: "commit", timeout });
-    await page.waitForLoadState("domcontentloaded", { timeout: 15_000 }).catch(() => undefined);
-    if (/continuelogin\.do/i.test(page.url())) {
-      await page.goto(normalizeSkyTouchLoginUrl(loginUrl), { waitUntil: "commit", timeout }).catch(() => undefined);
-    }
+    await agentStep("open-login", async () => {
+      await page.goto(loginUrl, { waitUntil: "commit", timeout });
+      await page.waitForLoadState("domcontentloaded", { timeout: 15_000 }).catch(() => undefined);
+      if (/continuelogin\.do/i.test(page.url())) {
+        await page.goto(normalizeSkyTouchLoginUrl(loginUrl), { waitUntil: "commit", timeout }).catch(() => undefined);
+      }
+      agentLog("step=open-login", `url=${page.url()}`);
+    });
 
-    const user = page.locator(selectors.username).first();
-    const pass = page.locator(selectors.password).first();
-    await user.waitFor({ state: "visible", timeout: 25_000 });
-    await user.fill(input.username);
-    await pass.fill(input.password);
-    await submitSkyTouchLogin(page, pass, selectors.submit);
-    await new Promise((resolve) => setTimeout(resolve, 2500));
-    await page.waitForLoadState("domcontentloaded", { timeout: 20_000 }).catch(() => undefined);
+    await agentStep("sign-in", async () => {
+      const user = page.locator(selectors.username).first();
+      const pass = page.locator(selectors.password).first();
+      await user.waitFor({ state: "visible", timeout: 25_000 });
+      await user.fill(input.username);
+      await pass.fill(input.password);
+      await submitSkyTouchLogin(page, pass, selectors.submit);
+      await new Promise((resolve) => setTimeout(resolve, 2500));
+      await page.waitForLoadState("domcontentloaded", { timeout: 20_000 }).catch(() => undefined);
 
-    const stillOnLogin =
-      (await page.locator(selectors.password).count()) > 0 &&
-      (await page.locator(selectors.password).first().isVisible().catch(() => false));
-    if (stillOnLogin) {
-      throw new Error("SkyTouch login failed during board write-back.");
-    }
+      const stillOnLogin =
+        (await page.locator(selectors.password).count()) > 0 &&
+        (await page.locator(selectors.password).first().isVisible().catch(() => false));
+      if (stillOnLogin) {
+        throw new Error("SkyTouch login failed during board write-back.");
+      }
+      agentLog("step=sign-in", `url=${page.url()}`);
+    });
 
-    await openHousekeepingCenter(page, selectors);
+    await agentStep("housekeeping-center", () => openHousekeepingCenter(page, selectors));
 
     // Dedupe by room — last write wins.
     const byRoom = new Map<string, SkyTouchBoardCondition>();
     for (const u of input.updates) byRoom.set(u.roomNumber, u.condition);
     const unique = [...byRoom.entries()].map(([roomNumber, condition]) => ({ roomNumber, condition }));
 
-    const rooms = await setBoardConditionOnPage(page, unique);
+    const rooms = await agentStep("set-ready", () => setBoardConditionOnPage(page, unique));
+    const failed = rooms.filter((room) => !room.ok);
+    agentLog(
+      "step=set-ready",
+      failed.length
+        ? `FAIL rooms=${failed.map((room) => `${room.roomNumber}:${room.error || "not saved"}`).join(",")}`
+        : `ok rooms=${rooms.map((room) => room.roomNumber).join(",")}`
+    );
     await context.close();
     return { rooms };
   } finally {

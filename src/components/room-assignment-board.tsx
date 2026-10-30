@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { GuestStayStatus, RoomStatus } from "@prisma/client";
 import { guestStayLabel, ROOM_STATUS_CONFIG, cn } from "@/lib/utils";
+import { pmsRoomLabel, type PortalPms } from "@/lib/pms/pms-labels";
 import { ApplyAiAssignmentsButton } from "@/components/apply-ai-assignments";
 import { AssignHousekeeperSelect, type HousekeeperOption } from "@/components/assign-housekeeper-select";
 import { RoomStayCue } from "@/components/room-stay-cue";
@@ -38,9 +39,11 @@ function needsCleaning(status: RoomStatus) {
 export function RoomAssignmentBoard({
   rooms: initialRooms,
   housekeepers,
+  pmsProvider = null,
 }: {
   rooms: AssignableRoom[];
   housekeepers: HousekeeperOption[];
+  pmsProvider?: PortalPms;
 }) {
   const router = useRouter();
   const [rooms, setRooms] = useState(initialRooms);
@@ -275,7 +278,7 @@ export function RoomAssignmentBoard({
                   <td className="px-3 py-2 text-muted-foreground">{room.floor}</td>
                   <td className="px-3 py-2">
                     <span className={cn("rounded-full px-2 py-0.5 text-xs font-medium", config.bg, config.text)}>
-                      {config.label}
+                      {pmsRoomLabel(room.status, room.guestStatus, pmsProvider)}
                     </span>
                   </td>
                   <td className="px-3 py-2">

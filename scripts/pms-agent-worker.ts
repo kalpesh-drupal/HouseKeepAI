@@ -1,6 +1,7 @@
 /**
- * SkyTouch portal agent for production data — Collect + Mark Clean write-back
- * with Chromium against DATABASE_URL.
+ * Portal agent — Collect + Mark Clean write-back with Chromium against DATABASE_URL.
+ * PMS_AGENT_PROVIDERS=SKYTOUCH|SYNXIS splits workers by PMS.
+ * PMS_AGENT_SLOT / PMS_AGENT_SLOTS splits hotels inside one PMS.
  *
  * Local:
  *   npm run pms:agent:loop
@@ -10,13 +11,15 @@
  *   See docs/PMS-AGENT.md
  */
 import { createServer } from "http";
-import { readFileSync, existsSync, appendFileSync, mkdirSync, writeFileSync } from "fs";
+import { existsSync, readFileSync, writeFileSync, mkdirSync } from "fs";
+import os from "os";
 import path from "path";
-import { PrismaClient, PmsProvider, PmsWriteJobStatus } from "@prisma/client";
+import { PrismaClient, PmsWriteJobStatus } from "@prisma/client";
+import { agentLog, recentAgentLogs, shortenAgentError } from "../src/lib/pms/agent-log";
+import { agentOwnsHotel, agentProviders, agentSlotLabel } from "../src/lib/pms/agent-fleet";
 
 const ROOT = process.cwd();
 const LOG_DIR = path.join(ROOT, ".tmp");
-const LOG_FILE = path.join(LOG_DIR, "pms-agent.log");
 const PID_FILE = path.join(LOG_DIR, "pms-agent.pid");
 /** Collect wake interval (write-backs use a faster separate loop). */
 const COLLECT_MS = Math.max(15_000, Number(process.env.PMS_AGENT_TICK_MS || 60_000));
@@ -43,14 +46,7 @@ function loadEnvFile(file: string) {
 }
 
 function log(message: string) {
-  const line = `[${new Date().toISOString()}] ${message}`;
-  console.log(line);
-  try {
-    mkdirSync(LOG_DIR, { recursive: true });
-    appendFileSync(LOG_FILE, `${line}\n`);
-  } catch {
-    // Container filesystems may be read-only for .tmp — stdout is enough.
-  }
+  agentLog(message);
 }
 
 /** Railway healthchecks expect something listening on $PORT. */
@@ -60,7 +56,14 @@ function startHealthServer() {
     log("no PORT set — skipping health server (ok for local / pure worker hosts)");
     return;
   }
-  const server = createServer((_req, res) => {
+  const server = createServer((req, res) => {
+    const pathName = (req.url || "/").split("?")[0];
+    if (pathName === "/logs") {
+      const body = recentAgentLogs() || "(no log lines yet)";
+      res.writeHead(200, { "Content-Type": "text/plain; charset=utf-8" });
+      res.end(`${body}\n`);
+      return;
+    }
     res.writeHead(200, { "Content-Type": "text/plain" });
     res.end("ok");
   });
@@ -72,54 +75,72 @@ function startHealthServer() {
   });
 }
 
-let writeBusy = false;
-let collectBusy = false;
+/** One Chrome at a time. A second browser on a small host dies at launch. */
+let chromeBusy: "write" | "collect" | null = null;
 
 async function runWrites() {
-  if (writeBusy) {
-    log("write tick skipped (previous write still in progress)");
+  if (chromeBusy) {
+    log(`write tick skipped (chrome busy: ${chromeBusy})`);
     return;
   }
-  writeBusy = true;
-  const { processPendingPortalWrites } = await import("../src/lib/pms/portal-write");
+  chromeBusy = "write";
   const prisma = new PrismaClient();
   try {
+    const { processPendingSkyTouchWrites, processPendingSynxisWrites } = await import("../src/lib/pms/portal-write");
+    const providers = agentProviders();
     await prisma.$connect();
     const pending = await prisma.pmsWriteJob.count({
       where: {
-        provider: { in: [PmsProvider.SKYTOUCH, PmsProvider.SYNXIS] },
+        provider: { in: providers },
         status: PmsWriteJobStatus.PENDING,
       },
     });
     if (pending > 0) log(`write-back pending=${pending}`);
-    const writes = await processPendingPortalWrites();
+    const parts = [];
+    if (providers.includes("SKYTOUCH")) parts.push(await processPendingSkyTouchWrites());
+    if (providers.includes("SYNXIS")) parts.push(await processPendingSynxisWrites());
+    const writes = parts.reduce(
+      (sum, part) => ({
+        jobs: sum.jobs + part.jobs,
+        updated: sum.updated + part.updated,
+        failed: sum.failed + part.failed,
+      }),
+      { jobs: 0, updated: 0, failed: 0 }
+    );
     if (writes.jobs > 0) {
       log(`write-back jobs=${writes.jobs} updated=${writes.updated} failed=${writes.failed}`);
     }
+  } catch (err) {
+    log(`write ERROR ${shortenAgentError(err)}`);
   } finally {
     await prisma.$disconnect().catch(() => undefined);
-    writeBusy = false;
+    chromeBusy = null;
   }
 }
 
 async function runCollects() {
-  if (collectBusy) {
-    log("collect tick skipped (previous collect still in progress)");
+  if (chromeBusy) {
+    log(`collect tick skipped (chrome busy: ${chromeBusy})`);
     return;
   }
-  collectBusy = true;
-  const { runPortalCollect } = await import("../src/lib/pms/portal-collect");
+  chromeBusy = "collect";
   const prisma = new PrismaClient();
   try {
+    const { runPortalCollect } = await import("../src/lib/pms/portal-collect");
     await prisma.$connect();
+    const providers = agentProviders();
     const connections = await prisma.pmsConnection.findMany({
       where: {
         portalEnabled: true,
-        provider: { in: [PmsProvider.SKYTOUCH, PmsProvider.SYNXIS] },
+        provider: { in: providers },
       },
+      orderBy: [{ provider: "asc" }, { hotelId: "asc" }],
     });
-    log(`collect tick hotels_with_portal=${connections.length}`);
-    for (const conn of connections) {
+    const owned = connections.filter((conn) => agentOwnsHotel(conn.hotelId));
+    log(
+      `collect tick hotels_with_portal=${connections.length} owned=${owned.length} providers=${providers.join(",") || "none"} slot=${agentSlotLabel()}`
+    );
+    for (const conn of owned) {
       const intervalMs = Math.max(1, conn.syncIntervalMinutes || 10) * 60 * 1000;
       const due = !conn.lastSyncAt || Date.now() - conn.lastSyncAt.getTime() >= intervalMs;
       if (!due) continue;
@@ -129,14 +150,14 @@ async function runCollects() {
           `collect provider=${conn.provider} hotel=${conn.hotelId} updated=${result.imported.updated} created=${result.imported.created} skipped=${result.imported.skipped}`
         );
       } catch (err) {
-        log(
-          `collect ERROR provider=${conn.provider} hotel=${conn.hotelId} ${err instanceof Error ? err.message : String(err)}`
-        );
+        log(`collect ERROR provider=${conn.provider} hotel=${conn.hotelId} ${shortenAgentError(err)}`);
       }
     }
+  } catch (err) {
+    log(`collect ERROR ${shortenAgentError(err)}`);
   } finally {
     await prisma.$disconnect().catch(() => undefined);
-    collectBusy = false;
+    chromeBusy = null;
   }
 }
 
@@ -144,9 +165,14 @@ async function main() {
   loadEnvFile(path.join(ROOT, ".env"));
   loadEnvFile(path.join(ROOT, ".env.local"));
 
+  const totalMb = Math.round(os.totalmem() / 1024 / 1024);
+  const freeMb = Math.round(os.freemem() / 1024 / 1024);
   log(
-    `boot has_DATABASE_URL=${Boolean(process.env.DATABASE_URL)} has_NEXTAUTH_SECRET=${Boolean(process.env.NEXTAUTH_SECRET)} has_PMS_CREDENTIALS_KEY=${Boolean(process.env.PMS_CREDENTIALS_KEY)}`
+    `boot has_DATABASE_URL=${Boolean(process.env.DATABASE_URL)} has_NEXTAUTH_SECRET=${Boolean(process.env.NEXTAUTH_SECRET)} has_PMS_CREDENTIALS_KEY=${Boolean(process.env.PMS_CREDENTIALS_KEY)} mem_total_mb=${totalMb} mem_free_mb=${freeMb}`
   );
+  if (totalMb < 1500) {
+    log("boot WARN memory under 1500 MB. Chrome needs about 2 GB or the browser dies at launch with pthread_create.");
+  }
 
   if (!process.env.DATABASE_URL) {
     throw new Error("DATABASE_URL is required (same production Postgres as Vercel)");
@@ -165,7 +191,7 @@ async function main() {
   startHealthServer();
 
   log(
-    `PMS agent started pid=${process.pid} write=${WRITE_MS / 1000}s collect=${COLLECT_MS / 1000}s docker=${process.env.PLAYWRIGHT_DOCKER || "0"}`
+    `PMS agent started pid=${process.pid} write=${WRITE_MS / 1000}s collect=${COLLECT_MS / 1000}s docker=${process.env.PLAYWRIGHT_DOCKER || "0"} providers=${agentProviders().join(",") || "none"} slot=${agentSlotLabel()}`
   );
 
   const safe = (fn: () => Promise<void>, label: string) =>

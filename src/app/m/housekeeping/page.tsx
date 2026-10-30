@@ -6,10 +6,15 @@ import { MobileRoomActions } from "@/components/mobile-room-actions";
 import { CleaningTimer } from "@/components/cleaning-timer";
 import { RoomCacheHydrator } from "@/components/room-cache-hydrator";
 import { RoomStayCue } from "@/components/room-stay-cue";
+import { activePortalProvider } from "@/lib/pms/active-provider";
+import { pmsRoomLabel } from "@/lib/pms/pms-labels";
 
 export default async function MobileHousekeepingPage() {
   const session = await requireAuth();
-  const rooms = await getRoomsForUser(session.user.hotelId, session.user.id, session.user.role);
+  const [rooms, pmsProvider] = await Promise.all([
+    getRoomsForUser(session.user.hotelId, session.user.id, session.user.role),
+    activePortalProvider(session.user.hotelId),
+  ]);
 
   return (
     <div className="space-y-4">
@@ -64,7 +69,7 @@ export default async function MobileHousekeepingPage() {
                   />
                 </div>
                 <span className={`rounded-full px-2 py-1 text-xs ${cfg.bg} ${cfg.text}`}>
-                  HK: {cfg.label}
+                  HK: {pmsRoomLabel(room.status, room.guestStatus, pmsProvider)}
                 </span>
               </div>
               <p className={`mb-2 inline-block rounded-full px-2 py-1 text-xs font-medium ${guestStayLabel(room.guestStatus, room.status).className}`}>
