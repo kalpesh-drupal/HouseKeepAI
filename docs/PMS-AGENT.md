@@ -32,6 +32,8 @@ The 12:37 PM failure for room 112 stopped at `browser-launch`. Railway’s conta
 | `NEXTAUTH_SECRET` or `PMS_CREDENTIALS_KEY` | Yes | Must match Vercel so portal passwords decrypt |
 | `PMS_AGENT_TICK_MS` | Optional | Default `60000` (collect loop; each hotel still uses its sync interval) |
 | `PMS_AGENT_WRITE_MS` | Optional | Default `30000` (Mark Clean write-back loop) |
+| `PMS_AGENT_PROVIDERS` | Per worker | `SYNXIS` on the current Railway service. `SKYTOUCH` on the SkyTouch worker |
+| `PLAYWRIGHT_PROXY_SERVER` | SkyTouch worker | Residential proxy, `http://user:pass@host:port`. SkyTouch drops Railway's own address |
 
 ## Deploy on Railway (recommended this week)
 

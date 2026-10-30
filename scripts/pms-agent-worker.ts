@@ -17,6 +17,7 @@ import path from "path";
 import { PrismaClient, PmsWriteJobStatus } from "@prisma/client";
 import { agentLog, recentAgentLogs, shortenAgentError } from "../src/lib/pms/agent-log";
 import { agentOwnsHotel, agentProviders, agentSlotLabel } from "../src/lib/pms/agent-fleet";
+import { playwrightProxyLabel } from "../src/lib/pms/playwright-host";
 
 const ROOT = process.cwd();
 const LOG_DIR = path.join(ROOT, ".tmp");
@@ -191,7 +192,7 @@ async function main() {
   startHealthServer();
 
   log(
-    `PMS agent started pid=${process.pid} write=${WRITE_MS / 1000}s collect=${COLLECT_MS / 1000}s docker=${process.env.PLAYWRIGHT_DOCKER || "0"} providers=${agentProviders().join(",") || "none"} slot=${agentSlotLabel()}`
+    `PMS agent started pid=${process.pid} write=${WRITE_MS / 1000}s collect=${COLLECT_MS / 1000}s docker=${process.env.PLAYWRIGHT_DOCKER || "0"} providers=${agentProviders().join(",") || "none"} slot=${agentSlotLabel()} proxy=${playwrightProxyLabel()}`
   );
 
   const safe = (fn: () => Promise<void>, label: string) =>

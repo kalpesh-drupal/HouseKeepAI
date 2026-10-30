@@ -5,7 +5,7 @@ import { randomUUID } from "crypto";
 import { housekeepingCheckOffToCsv } from "@/lib/pdf-hk";
 import type { PmsFlashStats } from "@/lib/pms/flash-stats";
 import { agentLog, agentStep, shortenAgentError } from "@/lib/pms/agent-log";
-import { assertPlaywrightHost, playwrightLaunchExtras } from "@/lib/pms/playwright-host";
+import { assertPlaywrightHost, playwrightLaunchExtras, playwrightProxy } from "@/lib/pms/playwright-host";
 
 export type PortalSelectors = {
   username?: string;
@@ -203,11 +203,13 @@ async function launchBrowser(chromium: Awaited<ReturnType<typeof loadPlaywright>
   assertPlaywrightHost();
   const args = ["--disable-dev-shm-usage", "--disable-http2", "--disable-features=IsolateOrigins,site-per-process"];
   const extras = playwrightLaunchExtras();
+  const proxy = playwrightProxy();
+  if (proxy) agentLog("step=browser-launch", `proxy=${proxy.server}`);
   // Docker / hosted agent: use Playwright's bundled Chromium (channel "chrome" is for local Macs).
   const preferBundled =
     process.env.PLAYWRIGHT_DOCKER === "1" || process.env.PLAYWRIGHT_CHROMIUM_ONLY === "1";
 
-  const launchBundled = () => chromium.launch({ ...extras, args });
+  const launchBundled = () => chromium.launch({ ...extras, args, ...(proxy ? { proxy } : {}) });
 
   if (preferBundled) {
     try {
@@ -223,6 +225,7 @@ async function launchBrowser(chromium: Awaited<ReturnType<typeof loadPlaywright>
       ...extras,
       channel: "chrome",
       args,
+      ...(proxy ? { proxy } : {}),
     });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);

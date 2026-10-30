@@ -34,6 +34,37 @@ export function playwrightHeadless(): boolean {
   return process.env.PLAYWRIGHT_HEADED !== "1";
 }
 
+/**
+ * Residential proxy for SkyTouch. Railway's own address never receives Login.do.
+ * PLAYWRIGHT_PROXY_SERVER=http://host:port
+ * or http://user:pass@host:port
+ * Username and password can also be PLAYWRIGHT_PROXY_USERNAME / PLAYWRIGHT_PROXY_PASSWORD.
+ */
+export function playwrightProxy():
+  | { server: string; username?: string; password?: string }
+  | undefined {
+  const raw = process.env.PLAYWRIGHT_PROXY_SERVER?.trim();
+  if (!raw) return undefined;
+  const withScheme = /^[a-z][a-z0-9+.-]*:\/\//i.test(raw) ? raw : `http://${raw}`;
+  try {
+    const url = new URL(withScheme);
+    const username = process.env.PLAYWRIGHT_PROXY_USERNAME?.trim() || decodeURIComponent(url.username || "");
+    const password = process.env.PLAYWRIGHT_PROXY_PASSWORD?.trim() || decodeURIComponent(url.password || "");
+    return {
+      server: `${url.protocol}//${url.host}`,
+      ...(username ? { username } : {}),
+      ...(password ? { password } : {}),
+    };
+  } catch {
+    return { server: raw };
+  }
+}
+
+export function playwrightProxyLabel(): string {
+  const proxy = playwrightProxy();
+  return proxy ? proxy.server : "off";
+}
+
 export function playwrightLaunchExtras(): { headless: boolean; slowMo?: number } {
   const headless = playwrightHeadless();
   if (headless) return { headless: true };
