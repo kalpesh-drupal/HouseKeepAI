@@ -192,6 +192,8 @@ model User {
   cleaningSessions   CleaningSession[]   @relation("CleaningSessions")
   pushSubscriptions  PushSubscription[]
   passwordResetRequests PasswordResetRequest[]
+
+  @@index([hotelId, active, role])
 }
 
 model PasswordResetRequest {
@@ -203,6 +205,7 @@ model PasswordResetRequest {
   user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([hotelId, resolvedAt])
+  @@index([userId, createdAt])
 }
 
 model Room {
@@ -243,6 +246,12 @@ model Room {
   cleaningSessions   CleaningSession[]
 
   @@unique([hotelId, number])
+  @@index([hotelId, status])
+  @@index([hotelId, housekeeperId])
+  @@index([hotelId, floor, number])
+  @@index([hotelId, arrivalDate])
+  @@index([hotelId, departureDate])
+  @@index([hotelId, isRush])
 }
 
 model ChecklistItem {
@@ -256,6 +265,8 @@ model ChecklistItem {
   updatedAt DateTime @updatedAt
 
   room Room @relation(fields: [roomId], references: [id], onDelete: Cascade)
+
+  @@index([roomId, sortOrder])
 }
 
 model Inspection {
@@ -271,6 +282,11 @@ model Inspection {
   room      Room @relation(fields: [roomId], references: [id], onDelete: Cascade)
   inspector User @relation(fields: [inspectorId], references: [id])
   items     InspectionItem[]
+
+  @@index([roomId, createdAt])
+  @@index([roomId, status])
+  @@index([inspectorId, createdAt])
+  @@index([status, createdAt])
 }
 
 model InspectionItem {
@@ -281,6 +297,8 @@ model InspectionItem {
   sortOrder    Int     @default(0)
 
   inspection Inspection @relation(fields: [inspectionId], references: [id], onDelete: Cascade)
+
+  @@index([inspectionId, sortOrder])
 }
 
 model MaintenanceTicket {
@@ -300,6 +318,11 @@ model MaintenanceTicket {
   room       Room  @relation(fields: [roomId], references: [id], onDelete: Cascade)
   hotel      Hotel @relation(fields: [hotelId], references: [id], onDelete: Cascade)
   assignedTo User? @relation("AssignedTechnician", fields: [assignedToId], references: [id])
+
+  @@index([hotelId, status, createdAt])
+  @@index([hotelId, createdAt])
+  @@index([roomId, createdAt])
+  @@index([assignedToId])
 }
 
 model GuestRequest {
@@ -316,6 +339,11 @@ model GuestRequest {
   room       Room  @relation(fields: [roomId], references: [id], onDelete: Cascade)
   hotel      Hotel @relation(fields: [hotelId], references: [id], onDelete: Cascade)
   assignedTo User? @relation("AssignedRequests", fields: [assignedToId], references: [id])
+
+  @@index([hotelId, status, createdAt])
+  @@index([hotelId, createdAt])
+  @@index([roomId, createdAt])
+  @@index([assignedToId])
 }
 
 model InventoryItem {
@@ -346,6 +374,8 @@ model LaundryBatch {
   updatedAt DateTime      @updatedAt
 
   hotel Hotel @relation(fields: [hotelId], references: [id], onDelete: Cascade)
+
+  @@index([hotelId, status])
 }
 
 model LostFoundItem {
@@ -364,6 +394,9 @@ model LostFoundItem {
 
   hotel   Hotel @relation(fields: [hotelId], references: [id], onDelete: Cascade)
   foundBy User? @relation("FoundBy", fields: [foundById], references: [id])
+
+  @@index([hotelId, status, createdAt])
+  @@index([hotelId, createdAt])
 }
 
 model Message {
@@ -380,6 +413,10 @@ model Message {
   hotel    Hotel @relation(fields: [hotelId], references: [id], onDelete: Cascade)
   sender   User  @relation("SentMessages", fields: [senderId], references: [id])
   receiver User? @relation("ReceivedMessages", fields: [receiverId], references: [id])
+
+  @@index([hotelId, createdAt])
+  @@index([senderId, createdAt])
+  @@index([receiverId, createdAt])
 }
 
 model RoomPhoto {
@@ -391,6 +428,8 @@ model RoomPhoto {
   createdAt DateTime @default(now())
 
   room Room @relation(fields: [roomId], references: [id], onDelete: Cascade)
+
+  @@index([roomId, createdAt])
 }
 
 model PmsConnection {
@@ -430,6 +469,8 @@ model PmsConnection {
   hotel Hotel @relation(fields: [hotelId], references: [id], onDelete: Cascade)
 
   @@unique([hotelId, provider])
+  @@index([portalEnabled])
+  @@index([enabled])
 }
 
 model PmsSyncLog {
@@ -443,6 +484,9 @@ model PmsSyncLog {
   createdAt DateTime      @default(now())
 
   hotel Hotel @relation(fields: [hotelId], references: [id], onDelete: Cascade)
+
+  @@index([hotelId, createdAt])
+  @@index([hotelId, provider, createdAt])
 }
 
 /// Queue of SkyTouch Housekeeping Center write-backs (clean / ready / dirty).
@@ -486,6 +530,15 @@ model PmsFlashSnapshot {
   vacant                Int?
   ooo                   Int?
   available             Int?
+  /// SynXis SPH Dashboard extras (optional for other PMS).
+  preArrivals           Int?
+  dayUse                Int?
+  checkedOut            Int?
+  vacantClean           Int?
+  vacantDirty           Int?
+  occupiedClean         Int?
+  occupiedDirty         Int?
+  outOfInventory        Int?
   createdAt             DateTime    @default(now())
 
   hotel Hotel @relation(fields: [hotelId], references: [id], onDelete: Cascade)
@@ -519,6 +572,7 @@ model RoomDaySnapshot {
 
   @@unique([roomId, businessDate])
   @@index([hotelId, businessDate])
+  @@index([hotelId, housekeeperId, businessDate])
 }
 
 /// One housekeeper clean, from start to finish, kept for day, month, and year reports.
@@ -554,4 +608,6 @@ model PushSubscription {
   createdAt DateTime @default(now())
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
 }

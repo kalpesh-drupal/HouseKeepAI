@@ -5,7 +5,7 @@ Vercel runs the HouseKeepAI web app. **SkyTouch Collect and Mark Clean write-bac
 Hotels only connect portal credentials in the PMS settings UI. They never install an agent.
 
 **SkyTouch:** Collect + Mark Clean → Ready.  
-**SynXis (opt-in):** Collect + Mark Clean → Clean. Email OTP + Remember me (~3 days) via IMAP bot inbox; agent reuses an encrypted session. When SynXis forces a ~45-day password change, the agent generates a new password, submits the change form, and stores it encrypted. Tune `portalSelectors` if the change-password UI differs. Prefer SPH API later if Aven grants access.
+**SynXis (opt-in):** Collect goes Front Office → Housekeeping → Room Status and imports Clean/Dirty rooms with occupancy (Vacant/Occupied) and guest stay (Stayover/Departing/Checked-out). It does not scrape SPH Dashboard flash (occupancy %, pre-arrival, arrivals, ADR). Mark Clean → Clean. Email OTP + Remember me (~3 days) via IMAP; encrypted session reuse; ~45-day password rotate. Override `portalSelectors.frontOfficeLink` / `housekeepingLink` / `boardUrl` if menus differ. Prefer SPH API later if Aven grants access.
 
 ## What you need
 

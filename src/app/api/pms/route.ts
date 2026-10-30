@@ -213,8 +213,11 @@ export async function POST(req: NextRequest) {
         statusMissing: result.imported.statusMissing,
         flash: result.flash,
         boardError: result.boardError || null,
+        compareWarnings: result.compareWarnings || [],
+        boardSummary: result.boardSummary || null,
       });
     } catch (err) {
+      console.error("[api/pms] portal_collect failed:", err instanceof Error ? err.message : err);
       return NextResponse.json(
         { error: err instanceof Error ? err.message : "Portal collect failed" },
         { status: 500 }

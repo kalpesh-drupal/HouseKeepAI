@@ -4,7 +4,7 @@ import { tmpdir } from "os";
 import { randomUUID } from "crypto";
 import { housekeepingCheckOffToCsv } from "@/lib/pdf-hk";
 import type { PmsFlashStats } from "@/lib/pms/flash-stats";
-import { assertPlaywrightHost } from "@/lib/pms/playwright-host";
+import { assertPlaywrightHost, playwrightLaunchExtras } from "@/lib/pms/playwright-host";
 
 export type PortalSelectors = {
   username?: string;
@@ -201,11 +201,12 @@ async function submitSkyTouchLogin(
 async function launchBrowser(chromium: Awaited<ReturnType<typeof loadPlaywright>>["chromium"]) {
   assertPlaywrightHost();
   const args = ["--disable-dev-shm-usage", "--disable-http2", "--disable-features=IsolateOrigins,site-per-process"];
+  const extras = playwrightLaunchExtras();
   // Docker / hosted agent: use Playwright's bundled Chromium (channel "chrome" is for local Macs).
   const preferBundled =
     process.env.PLAYWRIGHT_DOCKER === "1" || process.env.PLAYWRIGHT_CHROMIUM_ONLY === "1";
 
-  const launchBundled = () => chromium.launch({ headless: true, args });
+  const launchBundled = () => chromium.launch({ ...extras, args });
 
   if (preferBundled) {
     try {
@@ -218,7 +219,7 @@ async function launchBrowser(chromium: Awaited<ReturnType<typeof loadPlaywright>
 
   try {
     return await chromium.launch({
-      headless: true,
+      ...extras,
       channel: "chrome",
       args,
     });
@@ -849,6 +850,14 @@ async function extractSkyTouchHomeFlash(root: DomRoot): Promise<Omit<PmsFlashSta
         vacant,
         ooo,
         available,
+        preArrivals: null,
+        dayUse: null,
+        checkedOut: null,
+        vacantClean: null,
+        vacantDirty: null,
+        occupiedClean: null,
+        occupiedDirty: null,
+        outOfInventory: null,
       };
     })
     .catch(() => null);

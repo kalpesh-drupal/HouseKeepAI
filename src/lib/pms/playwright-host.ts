@@ -28,3 +28,19 @@ export function assertPlaywrightHost() {
   const reason = playwrightHostUnsupportedReason();
   if (reason) throw new Error(reason);
 }
+
+/** Local debug: set PLAYWRIGHT_HEADED=1 to watch Chromium during Collect. */
+export function playwrightHeadless(): boolean {
+  return process.env.PLAYWRIGHT_HEADED !== "1";
+}
+
+export function playwrightLaunchExtras(): { headless: boolean; slowMo?: number } {
+  const headless = playwrightHeadless();
+  if (headless) return { headless: true };
+  const slowMoRaw = process.env.PLAYWRIGHT_SLOW_MO;
+  const slowMo = slowMoRaw ? Number(slowMoRaw) : 150;
+  return {
+    headless: false,
+    ...(Number.isFinite(slowMo) && slowMo > 0 ? { slowMo } : {}),
+  };
+}

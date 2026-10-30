@@ -50,6 +50,13 @@ export default async function DashboardPage() {
   const canAssign = canAssignHousekeepers(session.user.role);
   const flash = stats.pmsFlash;
   const flashAt = formatFlashCollectedAt(flash?.collectedAt || stats.pmsFlashAt?.toISOString());
+  const flashProvider = stats.pmsFlashProvider;
+  const isSynxisFlash = flashProvider === "SYNXIS";
+  const flashTitle = isSynxisFlash
+    ? "Today from SynXis Room Status"
+    : flashProvider === "SKYTOUCH"
+      ? "Today from SkyTouch"
+      : "Today from PMS";
 
   return (
     <div className="space-y-8">
@@ -64,9 +71,12 @@ export default async function DashboardPage() {
         <section className="space-y-4">
           <div className="flex flex-wrap items-end justify-between gap-2">
             <div>
-              <h2 className="text-xl font-semibold">Today from SkyTouch</h2>
+              <h2 className="text-xl font-semibold">{flashTitle}</h2>
               <p className="text-sm text-muted-foreground">
-                Home page flash stats{flashAt ? ` · collected ${flashAt}` : ""}
+                {isSynxisFlash
+                  ? "Front Office → Housekeeping → Room Status"
+                  : "Home page flash stats"}
+                {flashAt ? ` · collected ${flashAt}` : ""}
                 {" · "}
                 <Link href="/pms" className="underline underline-offset-2 hover:text-foreground">
                   Collect again
@@ -75,45 +85,87 @@ export default async function DashboardPage() {
             </div>
           </div>
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
-            <StatCard
-              title="Today's Occupancy"
-              value={flashValue(flash.occupancyPercent, "%")}
-              icon={Users}
-              variant="info"
-            />
-            <StatCard
-              title="Expected ADR"
-              value={flash.expectedAdr != null ? `$${flash.expectedAdr.toFixed(2)}` : "—"}
-              icon={DollarSign}
-            />
-            <StatCard title="Total Arrivals" value={flashValue(flash.totalArrivals)} icon={LogIn} />
-            <StatCard
-              title="Check-ins Completed"
-              value={flashValue(flash.checkInsCompleted)}
-              icon={CheckCircle}
-              variant="success"
-            />
-            <StatCard
-              title="Check-ins Remaining"
-              value={flashValue(flash.checkInsRemaining ?? flash.checkIns)}
-              icon={ClipboardCheck}
-              variant="warning"
-            />
-            <StatCard title="Departures" value={flashValue(flash.totalDepartures)} icon={LogOut} />
-            <StatCard title="Stayovers" value={flashValue(flash.stayovers)} icon={BedDouble} />
-            <StatCard title="Vacant" value={flashValue(flash.vacant)} icon={DoorOpen} />
-            <StatCard
-              title="Available"
-              value={flashValue(flash.totalRoomsAvailable ?? flash.available)}
-              icon={Home}
-            />
-            <StatCard
-              title="Vacant / Dirty Remaining"
-              value={flashValue(flash.vacantDirtyRemaining)}
-              icon={Sparkles}
-              variant="danger"
-            />
-            <StatCard title="Out of Order" value={flashValue(flash.ooo)} icon={Ban} variant="warning" />
+            {isSynxisFlash ? (
+              <>
+                <StatCard
+                  title="Vacant/Dirty"
+                  value={flashValue(flash.vacantDirty ?? flash.vacantDirtyRemaining)}
+                  icon={Sparkles}
+                  variant="danger"
+                />
+                <StatCard
+                  title="Vacant/Clean"
+                  value={flashValue(flash.vacantClean)}
+                  icon={CheckCircle}
+                  variant="success"
+                />
+                <StatCard
+                  title="Occupied/Dirty"
+                  value={flashValue(flash.occupiedDirty)}
+                  icon={Sparkles}
+                  variant="warning"
+                />
+                <StatCard
+                  title="Occupied/Clean"
+                  value={flashValue(flash.occupiedClean)}
+                  icon={CheckCircle}
+                  variant="success"
+                />
+                <StatCard title="Stay Overs" value={flashValue(flash.stayovers)} icon={BedDouble} />
+                <StatCard title="Departing" value={flashValue(flash.totalDepartures)} icon={LogOut} />
+                <StatCard title="Checked-out" value={flashValue(flash.checkedOut)} icon={DoorOpen} />
+                <StatCard title="Arriving" value={flashValue(flash.totalArrivals)} icon={LogIn} />
+                <StatCard title="Out of Order" value={flashValue(flash.ooo)} icon={Ban} variant="warning" />
+                <StatCard
+                  title="Out Of Inventory"
+                  value={flashValue(flash.outOfInventory)}
+                  icon={Ban}
+                  variant="danger"
+                />
+              </>
+            ) : (
+              <>
+                <StatCard
+                  title="Today's Occupancy"
+                  value={flashValue(flash.occupancyPercent, "%")}
+                  icon={Users}
+                  variant="info"
+                />
+                <StatCard
+                  title="Expected ADR"
+                  value={flash.expectedAdr != null ? `$${flash.expectedAdr.toFixed(2)}` : "—"}
+                  icon={DollarSign}
+                />
+                <StatCard title="Total Arrivals" value={flashValue(flash.totalArrivals)} icon={LogIn} />
+                <StatCard
+                  title="Check-ins Completed"
+                  value={flashValue(flash.checkInsCompleted)}
+                  icon={CheckCircle}
+                  variant="success"
+                />
+                <StatCard
+                  title="Check-ins Remaining"
+                  value={flashValue(flash.checkInsRemaining ?? flash.checkIns)}
+                  icon={ClipboardCheck}
+                  variant="warning"
+                />
+                <StatCard title="Departures" value={flashValue(flash.totalDepartures)} icon={LogOut} />
+                <StatCard title="Stayovers" value={flashValue(flash.stayovers)} icon={BedDouble} />
+                <StatCard title="Vacant" value={flashValue(flash.vacant)} icon={DoorOpen} />
+                <StatCard
+                  title="Available"
+                  value={flashValue(flash.totalRoomsAvailable ?? flash.available)}
+                  icon={Home}
+                />
+                <StatCard
+                  title="Vacant / Dirty Remaining"
+                  value={flashValue(flash.vacantDirtyRemaining)}
+                  icon={Sparkles}
+                  variant="danger"
+                />
+                <StatCard title="Out of Order" value={flashValue(flash.ooo)} icon={Ban} variant="warning" />
+              </>
+            )}
           </div>
         </section>
       )}
@@ -198,10 +250,12 @@ export default async function DashboardPage() {
         {flash?.totalDepartures == null && (
           <StatCard title="Today's Departures" value={stats.departures} icon={LogOut} href="/map?filter=departure" />
         )}
-        {flash?.vacantDirtyRemaining == null && (
+        {flash?.vacantDirtyRemaining == null && flash?.vacantDirty == null && (
           <StatCard title="Dirty" value={stats.vacantDirty} icon={Sparkles} variant="danger" href="/map?filter=dirty" />
         )}
-        <StatCard title="Clean" value={stats.vacantClean} icon={CheckCircle} variant="success" href="/map?filter=clean" />
+        {flash?.vacantClean == null && (
+          <StatCard title="Clean" value={stats.vacantClean} icon={CheckCircle} variant="success" href="/map?filter=clean" />
+        )}
         {flash?.ooo == null && (
           <StatCard title="Out of Order" value={stats.outOfOrder} icon={Ban} variant="warning" />
         )}

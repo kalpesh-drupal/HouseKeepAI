@@ -1,6 +1,6 @@
 import type { PmsFlashSnapshot, PmsProvider } from "@prisma/client";
 
-/** SkyTouch Welcome / Home page flash metrics shown on the HouseKeepAI dashboard. */
+/** Home / Welcome / SPH Dashboard flash metrics shown on the HouseKeepAI dashboard. */
 export type PmsFlashStats = {
   occupancyPercent: number | null;
   expectedAdr: number | null;
@@ -16,6 +16,15 @@ export type PmsFlashStats = {
   vacant: number | null;
   ooo: number | null;
   available: number | null;
+  /** SynXis SPH Dashboard (and similar) room-status / stay counts. */
+  preArrivals: number | null;
+  dayUse: number | null;
+  checkedOut: number | null;
+  vacantClean: number | null;
+  vacantDirty: number | null;
+  occupiedClean: number | null;
+  occupiedDirty: number | null;
+  outOfInventory: number | null;
   collectedAt: string;
   sourceUrl?: string;
 };
@@ -25,7 +34,31 @@ export function parseFlashStatsJson(raw: string | null | undefined): PmsFlashSta
   try {
     const parsed = JSON.parse(raw) as PmsFlashStats;
     if (!parsed || typeof parsed !== "object") return null;
-    return parsed;
+    return {
+      occupancyPercent: parsed.occupancyPercent ?? null,
+      expectedAdr: parsed.expectedAdr ?? null,
+      totalArrivals: parsed.totalArrivals ?? null,
+      checkInsCompleted: parsed.checkInsCompleted ?? null,
+      checkInsRemaining: parsed.checkInsRemaining ?? null,
+      totalDepartures: parsed.totalDepartures ?? null,
+      vacantDirtyRemaining: parsed.vacantDirtyRemaining ?? null,
+      totalRoomsAvailable: parsed.totalRoomsAvailable ?? null,
+      checkIns: parsed.checkIns ?? null,
+      stayovers: parsed.stayovers ?? null,
+      vacant: parsed.vacant ?? null,
+      ooo: parsed.ooo ?? null,
+      available: parsed.available ?? null,
+      preArrivals: parsed.preArrivals ?? null,
+      dayUse: parsed.dayUse ?? null,
+      checkedOut: parsed.checkedOut ?? null,
+      vacantClean: parsed.vacantClean ?? null,
+      vacantDirty: parsed.vacantDirty ?? null,
+      occupiedClean: parsed.occupiedClean ?? null,
+      occupiedDirty: parsed.occupiedDirty ?? null,
+      outOfInventory: parsed.outOfInventory ?? null,
+      collectedAt: parsed.collectedAt,
+      sourceUrl: parsed.sourceUrl,
+    };
   } catch {
     return null;
   }
@@ -46,6 +79,14 @@ export function flashStatsFromSnapshot(row: PmsFlashSnapshot): PmsFlashStats {
     vacant: row.vacant,
     ooo: row.ooo,
     available: row.available,
+    preArrivals: row.preArrivals,
+    dayUse: row.dayUse,
+    checkedOut: row.checkedOut,
+    vacantClean: row.vacantClean,
+    vacantDirty: row.vacantDirty,
+    occupiedClean: row.occupiedClean,
+    occupiedDirty: row.occupiedDirty,
+    outOfInventory: row.outOfInventory,
     collectedAt: row.collectedAt.toISOString(),
     sourceUrl: row.sourceUrl || undefined,
   };
@@ -74,6 +115,14 @@ export function flashSnapshotCreateData(
     vacant: flash.vacant,
     ooo: flash.ooo,
     available: flash.available,
+    preArrivals: flash.preArrivals,
+    dayUse: flash.dayUse,
+    checkedOut: flash.checkedOut,
+    vacantClean: flash.vacantClean,
+    vacantDirty: flash.vacantDirty,
+    occupiedClean: flash.occupiedClean,
+    occupiedDirty: flash.occupiedDirty,
+    outOfInventory: flash.outOfInventory,
   };
 }
 

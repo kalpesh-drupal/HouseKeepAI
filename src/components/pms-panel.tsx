@@ -270,18 +270,50 @@ export function PmsPanel({ connections, logs }: { connections: Connection[]; log
             totalArrivals?: number | null;
             totalDepartures?: number | null;
             stayovers?: number | null;
+            vacantClean?: number | null;
+            vacantDirty?: number | null;
+            occupiedClean?: number | null;
+            occupiedDirty?: number | null;
           }
         | null
         | undefined;
+      const compareWarnings = Array.isArray(data.compareWarnings)
+        ? data.compareWarnings.map(String)
+        : [];
       const flashPart = flash
-        ? ` Dashboard: occupancy ${flash.occupancyPercent ?? "—"}%, ADR ${flash.expectedAdr ?? "—"}, arrivals ${flash.totalArrivals ?? "—"}, departures ${flash.totalDepartures ?? "—"}, stayovers ${flash.stayovers ?? "—"}.`
+        ? ` Dashboard: occupancy ${flash.occupancyPercent ?? "—"}%, ADR ${flash.expectedAdr ?? "—"}, arrivals ${flash.totalArrivals ?? "—"}, departures ${flash.totalDepartures ?? "—"}, stayovers ${flash.stayovers ?? "—"}${
+            flash.vacantDirty != null || flash.vacantClean != null
+              ? `, V/C ${flash.vacantClean ?? "—"} V/D ${flash.vacantDirty ?? "—"} O/C ${flash.occupiedClean ?? "—"} O/D ${flash.occupiedDirty ?? "—"}`
+              : ""
+          }.`
         : "";
+      const boardSummary = data.boardSummary as
+        | {
+            roomTotal?: number;
+            dirtyTotal?: number;
+            vacantClean?: number;
+            vacantDirty?: number;
+            occupiedClean?: number;
+            occupiedDirty?: number;
+          }
+        | null
+        | undefined;
+      const summaryPart = boardSummary
+        ? ` Status mix: ${boardSummary.roomTotal ?? "—"} rooms, Dirty ${boardSummary.dirtyTotal ?? "—"} (V/C ${boardSummary.vacantClean ?? "—"} V/D ${boardSummary.vacantDirty ?? "—"} O/C ${boardSummary.occupiedClean ?? "—"} O/D ${boardSummary.occupiedDirty ?? "—"}).`
+        : "";
+      const comparePart = compareWarnings.length
+        ? ` Discrepancy vs SPH Dashboard: ${compareWarnings.slice(0, 4).join("; ")}${
+            compareWarnings.length > 4 ? "…" : ""
+          }.`
+        : data.filename
+          ? " Matches SPH Dashboard / Total Dirty Rooms."
+          : "";
       const boardPart = data.filename
-        ? ` Collected ${data.filename}: ${data.updated} rooms updated, ${data.created} created, ${data.skipped} skipped${
+        ? ` Room Status imported (${data.updated} updated, ${data.created} created, ${data.skipped} skipped)${
             warnings.length ? `. ${warnings[0]}` : ""
-          }${preview ? ` · Parsed: ${preview}` : ""}.`
+          }${preview ? ` · ${preview}` : ""}.`
         : data.boardError
-          ? ` Room board: ${String(data.boardError)}`
+          ? ` Room Status: ${String(data.boardError)}`
           : "";
       const text = data.success
         ? data.deferred
@@ -289,7 +321,7 @@ export function PmsPanel({ connections, logs }: { connections: Connection[]; log
               data.message ||
                 "Portal sync is enabled. The Railway PMS agent will collect from SkyTouch automatically (about every 10 minutes)."
             )
-          : `${flashPart || "Collect finished."}${boardPart}`.trim()
+          : `${flashPart || "Collect finished."}${summaryPart}${boardPart}${comparePart}`.trim()
         : String(data.error || "Portal collect failed");
       setMessage(text);
       setPortalStatus(text);

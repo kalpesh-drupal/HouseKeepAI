@@ -70,6 +70,8 @@ export async function runPortalCollect(hotelId: string, provider: PmsProvider) {
     mime: string | null;
     flash?: Awaited<ReturnType<typeof collectSkyTouchHousekeepingReport>>["flash"];
     boardError?: string;
+    compareWarnings?: string[];
+    boardSummary?: Awaited<ReturnType<typeof collectSynxisHousekeepingReport>>["boardSummary"];
   };
   try {
     if (provider === PmsProvider.SYNXIS) {
@@ -127,7 +129,15 @@ export async function runPortalCollect(hotelId: string, provider: PmsProvider) {
           );
         }
       }
-      file = { ...syn, flash: null };
+      file = {
+        buffer: syn.buffer,
+        filename: syn.filename,
+        mime: syn.mime,
+        flash: syn.flash,
+        boardError: syn.boardError,
+        compareWarnings: syn.compareWarnings,
+        boardSummary: syn.boardSummary,
+      };
     } else {
       file = await collectSkyTouchHousekeepingReport({
         loginUrl: connection.portalLoginUrl,
@@ -199,21 +209,37 @@ export async function runPortalCollect(hotelId: string, provider: PmsProvider) {
     ? ` Home: occupancy ${file.flash.occupancyPercent ?? "—"}%, ADR ${file.flash.expectedAdr ?? "—"}, arrivals ${file.flash.totalArrivals ?? "—"}, departures ${file.flash.totalDepartures ?? "—"}, stayovers ${file.flash.stayovers ?? "—"}.`
     : "";
   const boardHint = file.boardError ? ` Board: ${file.boardError}` : "";
+  const summary = file.boardSummary;
+  const summaryHint = summary
+    ? ` Room Status: ${summary.roomTotal} rooms · Dirty ${summary.dirtyTotal} · Clean ${
+        (summary.vacantClean ?? 0) + (summary.occupiedClean ?? 0)
+      } · V/D ${summary.vacantDirty} O/D ${summary.occupiedDirty}.`
+    : "";
+  const compareHint = file.compareWarnings?.length
+    ? ` Discrepancy: ${file.compareWarnings.slice(0, 5).join("; ")}${
+        file.compareWarnings.length > 5 ? "…" : ""
+      }.`
+    : "";
   const warningHint = importedSummary.warnings?.length
     ? ` Warnings: ${importedSummary.warnings.slice(0, 3).join(" | ")}`
     : "";
   const roomPart = file.filename
     ? `Collected ${file.filename}. Updated ${importedSummary.updated}, created ${importedSummary.created}, skipped ${importedSummary.skipped}.`
-    : provider === PmsProvider.SKYTOUCH
-      ? "Home flash stats collected; room board was not imported."
-      : "SynXis collect finished without a room file.";
+    : provider === PmsProvider.SYNXIS
+      ? "SynXis Room Status board was not imported."
+      : provider === PmsProvider.SKYTOUCH
+        ? "Home flash stats collected; room board was not imported."
+        : "SynXis collect finished without a room file.";
 
   const records = importedSummary.updated + importedSummary.created;
+  const hasCompareMismatch = Boolean(file.compareWarnings?.length);
   const status =
     file.flash || records > 0
       ? file.boardError && !records
         ? PmsSyncStatus.PARTIAL
-        : PmsSyncStatus.SUCCESS
+        : hasCompareMismatch
+          ? PmsSyncStatus.PARTIAL
+          : PmsSyncStatus.SUCCESS
       : PmsSyncStatus.PARTIAL;
 
   await prisma.pmsSyncLog.create({
@@ -223,7 +249,7 @@ export async function runPortalCollect(hotelId: string, provider: PmsProvider) {
       action: "PORTAL_COLLECT",
       records,
       status,
-      message: `${roomPart}${flashHint}${boardHint}${warningHint}`,
+      message: `${roomPart}${flashHint}${summaryHint}${boardHint}${compareHint}${warningHint}`,
     },
   });
 
@@ -232,5 +258,7 @@ export async function runPortalCollect(hotelId: string, provider: PmsProvider) {
     filename: file.filename,
     flash: file.flash ?? null,
     boardError: file.boardError,
+    compareWarnings: file.compareWarnings ?? [],
+    boardSummary: file.boardSummary ?? null,
   };
 }
