@@ -3031,9 +3031,11 @@ async function controlIsDisabled(el: import("playwright").Locator) {
 }
 
 /**
- * Step 2 on the Room Status toolbar (not the column header):
+ * Step 2 on the Room Status toolbar (not the column header, not the filter panel):
  * HOUSEKEEPING STATUS sits beside OCCUPANCY STATUS and MANAGE ASSIGNMENTS.
  * It stays disabled until a room checkbox is checked.
+ * The filter panel also has a "Housekeeping Status" header (spark-filter-module__header).
+ * That header is covered by spark-filter__header and must not be clicked.
  */
 const TAG_SYNXIS_HK_TOOLBAR_FN = () => {
   const normalize = (s: string) => (s || "").replace(/\u00a0/g, " ").replace(/\s+/g, " ").trim();
@@ -3044,26 +3046,55 @@ const TAG_SYNXIS_HK_TOOLBAR_FN = () => {
     el.getAttribute("aria-disabled") === "true" ||
     /\b(disabled|k-disabled|k-state-disabled|is-disabled)\b/i.test(String(el.className || ""));
 
-  const hits: Array<{ tag: string; toolbar: boolean; disabled: boolean; text: string }> = [];
+  const isFilter = (el: HTMLElement) =>
+    Boolean(el.closest("[class*='spark-filter']")) || /spark-filter/i.test(String(el.className || ""));
+
+  const inToolbar = (el: HTMLElement) => {
+    let node: HTMLElement | null = el.parentElement;
+    for (let depth = 0; node && depth < 8; depth++) {
+      const text = normalize(node.innerText || "");
+      if (text.length > 700) return false;
+      if (
+        /housekeeping\s*status/i.test(text) &&
+        /occupancy\s*status/i.test(text) &&
+        /manage\s*assignments|out\s*of\s*order/i.test(text)
+      ) {
+        return true;
+      }
+      node = node.parentElement;
+    }
+    return false;
+  };
+
+  const clickable = (el: HTMLElement) =>
+    el.tagName === "BUTTON" || el.tagName === "A" || el.getAttribute("role") === "button";
+
+  const hits: Array<{ tag: string; className: string; toolbar: boolean; disabled: boolean }> = [];
   const nodes = Array.from(document.querySelectorAll("button, a, [role='button'], div, span, li")) as HTMLElement[];
-  let chosen: HTMLElement | null = null;
+  const candidates: Array<{ el: HTMLElement; area: number; clickable: boolean }> = [];
   for (const el of nodes) {
     const text = normalize(el.innerText || el.textContent || "");
     if (!/^housekeeping\s*status$/i.test(text)) continue;
     if (el.closest("thead, th, [role='columnheader']")) continue;
-    const parent = normalize(el.parentElement?.innerText || "");
-    const toolbar = /occupancy\s*status/i.test(parent) && /manage\s*assignments|out\s*of\s*order/i.test(parent);
+    if (isFilter(el)) continue;
+    const toolbar = inToolbar(el);
     const disabled = disabledOf(el);
-    if (hits.length < 8) hits.push({ tag: el.tagName, toolbar, disabled, text: text.slice(0, 40) });
-    if (disabled) continue;
-    if (toolbar) {
-      chosen = el;
-      break;
+    if (hits.length < 8) {
+      hits.push({
+        tag: el.tagName,
+        className: String(el.className || "").slice(0, 80),
+        toolbar,
+        disabled,
+      });
     }
-    if (!chosen) chosen = el;
+    if (!toolbar || disabled) continue;
+    const rect = el.getBoundingClientRect();
+    if (rect.width < 8 || rect.height < 8) continue;
+    candidates.push({ el, area: rect.width * rect.height, clickable: clickable(el) });
   }
-  if (!chosen) return { found: false as const, hits };
-  chosen.setAttribute("data-hk-menu", "1");
+  if (!candidates.length) return { found: false as const, hits };
+  candidates.sort((a, b) => Number(b.clickable) - Number(a.clickable) || a.area - b.area);
+  candidates[0].el.setAttribute("data-hk-menu", "1");
   return { found: true as const, hits };
 };
 
@@ -3080,9 +3111,25 @@ async function clickHousekeepingStatusMenu(page: import("playwright").Page) {
       if ((await button.count().catch(() => 0)) === 0) continue;
       if (!(await button.isVisible().catch(() => false))) continue;
       if (await controlIsDisabled(button)) continue;
-      await button.click({ timeout: 4_000 });
-      synxisLog("write:menu-target", { hits: tagged.hits });
-      return true;
+      const clicked = await button
+        .click({ timeout: 2_500 })
+        .then(() => "click" as const)
+        .catch(async () => {
+          const forced = await button
+            .click({ timeout: 2_500, force: true })
+            .then(() => "force" as const)
+            .catch(() => null);
+          if (forced) return forced;
+          const dom = await button
+            .evaluate((el) => {
+              (el as HTMLElement).click();
+              return true;
+            })
+            .catch(() => false);
+          return dom ? ("dom" as const) : null;
+        });
+      synxisLog("write:menu-target", { hits: tagged.hits, clicked });
+      if (clicked) return true;
     }
     await new Promise((r) => setTimeout(r, 400));
   }
@@ -3235,7 +3282,8 @@ async function markSynxisRoomClean(
       else await box.click({ force: true }).catch(() => undefined);
     }
     tagged = true;
-    synxisLog("write:checkbox", { roomNumber, checked });
+    synxisLog("write:step", { step: 1, action: "checkbox", roomNumber, checked });
+    if (process.env.PLAYWRIGHT_HEADED === "1") await new Promise((r) => setTimeout(r, 1200));
     break;
   }
 
@@ -3250,18 +3298,20 @@ async function markSynxisRoomClean(
   }
 
   const menu = await clickHousekeepingStatusMenu(page);
-  synxisLog("write:menu", { roomNumber, opened: menu });
+  synxisLog("write:step", { step: 2, action: "housekeeping-status-toolbar", roomNumber, opened: menu });
   if (!menu) return { ok: false, error: "Housekeeping Status menu did not become available" };
+  if (process.env.PLAYWRIGHT_HEADED === "1") await new Promise((r) => setTimeout(r, 1200));
 
   const window = await housekeepingChoiceWindow(page);
   if (!window) return { ok: false, error: "Housekeeping Status window did not open" };
 
   const clean = await clickCleanRadio(window);
-  synxisLog("write:radio", { roomNumber, clean });
+  synxisLog("write:step", { step: 3, action: "clean-radio", roomNumber, clean });
   if (!clean) return { ok: false, error: "Clean radio button was not in the housekeeping window" };
+  if (process.env.PLAYWRIGHT_HEADED === "1") await new Promise((r) => setTimeout(r, 1200));
 
   const updated = await clickHousekeepingUpdate(window);
-  synxisLog("write:update", { roomNumber, updated });
+  synxisLog("write:step", { step: 4, action: "update", roomNumber, updated });
   if (!updated) return { ok: false, error: "Update button was not in the housekeeping window" };
 
   await new Promise((r) => setTimeout(r, 1200));
