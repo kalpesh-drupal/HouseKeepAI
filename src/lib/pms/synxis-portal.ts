@@ -2947,8 +2947,9 @@ export type SynxisBoardWriteResult = {
 };
 
 /**
- * Tag the checkbox on the room row collect already reads.
- * The box can sit in a frozen column beside the room number.
+ * The checkbox is the small box directly in front of the room number.
+ * Checking it highlights that row, and HOUSEKEEPING STATUS turns on immediately.
+ * Frozen columns can put the box in a sibling table on the same horizontal line.
  */
 const TAG_SYNXIS_ROOM_CHECKBOX_FN = (room: string) => {
   const normalize = (s: string) => (s || "").replace(/\u00a0/g, " ").replace(/\s+/g, " ").trim();
@@ -2963,57 +2964,48 @@ const TAG_SYNXIS_ROOM_CHECKBOX_FN = (room: string) => {
     return Boolean(t) && t.length <= 12 && roomRe.test(t) && t === want;
   };
 
-  const rowHasRoom = (tr: HTMLElement) => {
-    for (const link of Array.from(tr.querySelectorAll("a"))) {
-      if (isRoom(link.textContent || "")) return true;
-    }
-    const cells = Array.from(tr.querySelectorAll("td, [role='gridcell'], [role='cell']")) as HTMLElement[];
-    for (const cell of cells) {
-      const text = normalize(cell.innerText || "");
-      if (text.length <= 8 && isRoom(text)) return true;
-    }
-    return false;
-  };
-
-  const checkboxIn = (tr: HTMLElement) => {
-    const input = tr.querySelector("input[type='checkbox']") as HTMLInputElement | null;
-    const label = `${input?.getAttribute("aria-label") || ""} ${input?.getAttribute("title") || ""}`;
-    if (input && !/select\s*all/i.test(label)) return input;
-    const role = tr.querySelector("[role='checkbox']") as HTMLElement | null;
-    if (role && !/select\s*all/i.test(`${role.getAttribute("aria-label") || ""} ${role.getAttribute("title") || ""}`)) {
-      return role;
-    }
-    return null;
-  };
-
-  const rows = Array.from(
-    document.querySelectorAll("table tbody tr, [role='row'], .k-master-row, .dx-data-row, .ag-row")
-  ) as HTMLElement[];
-  for (const tr of rows) {
-    if (!rowHasRoom(tr)) continue;
-    const table = tr.closest("table");
-    const index = table ? Array.from(table.querySelectorAll("tbody tr")).indexOf(tr as HTMLTableRowElement) : -1;
-    const candidates: HTMLElement[] = [tr];
-    if (index >= 0) {
-      document.querySelectorAll("table").forEach((other) => {
-        if (other === table) return;
-        const twin = other.querySelectorAll("tbody tr")[index];
-        if (twin instanceof HTMLElement) candidates.push(twin);
-      });
-    }
-    for (const candidate of candidates) {
-      const box = checkboxIn(candidate);
-      if (!box) continue;
-      box.setAttribute("data-hk-check", "1");
-      return { found: true as const };
-    }
-    const firstCell = (tr.querySelector("td, [role='gridcell']") || candidates[0]) as HTMLElement | null;
-    if (firstCell) {
-      firstCell.setAttribute("data-hk-check", "1");
-      return { found: true as const, cell: true as const };
+  const roomNodes = Array.from(document.querySelectorAll("a, td, span, [role='gridcell']")) as HTMLElement[];
+  let roomEl: HTMLElement | null = null;
+  let roomArea = Number.POSITIVE_INFINITY;
+  for (const el of roomNodes) {
+    const text = normalize(el.innerText || el.textContent || "");
+    if (text.length > 8 || !isRoom(text)) continue;
+    const rect = el.getBoundingClientRect();
+    if (rect.width < 8 || rect.height < 8) continue;
+    const area = rect.width * rect.height;
+    if (area < roomArea) {
+      roomEl = el;
+      roomArea = area;
     }
   }
-  return { found: false as const };
+  if (!roomEl) return { found: false as const };
+
+  const roomRect = roomEl.getBoundingClientRect();
+  const roomMidY = roomRect.top + roomRect.height / 2;
+  const boxes = Array.from(
+    document.querySelectorAll("input[type='checkbox'], [role='checkbox'], [class*='checkbox' i]")
+  ) as HTMLElement[];
+  let best: HTMLElement | null = null;
+  let bestScore = Number.POSITIVE_INFINITY;
+  for (const box of boxes) {
+    const label = `${box.getAttribute("aria-label") || ""} ${box.getAttribute("title") || ""} ${box.id || ""}`;
+    if (/select\s*all/i.test(label)) continue;
+    const rect = box.getBoundingClientRect();
+    if (rect.width < 8 || rect.height < 8 || rect.width > 36 || rect.height > 36) continue;
+    const midY = rect.top + rect.height / 2;
+    const dy = Math.abs(midY - roomMidY);
+    if (dy > 16) continue;
+    const gap = roomRect.left - rect.right;
+    if (gap < -6 || gap > 180) continue;
+    const score = dy * 20 + gap;
+    if (score < bestScore) {
+      best = box;
+      bestScore = score;
+    }
+  }
+  if (!best) return { found: false as const };
+  best.setAttribute("data-hk-check", "1");
+  return { found: true as const };
 };
 
 async function controlIsDisabled(el: import("playwright").Locator) {
@@ -3046,8 +3038,9 @@ const TAG_SYNXIS_HK_TOOLBAR_FN = () => {
     el.getAttribute("aria-disabled") === "true" ||
     /\b(disabled|k-disabled|k-state-disabled|is-disabled)\b/i.test(String(el.className || ""));
 
-  const isFilter = (el: HTMLElement) =>
-    Boolean(el.closest("[class*='spark-filter']")) || /spark-filter/i.test(String(el.className || ""));
+  const isFilterHeader = (el: HTMLElement) =>
+    /spark-filter-module__header|spark-filter__header/i.test(String(el.className || "")) ||
+    Boolean(el.closest(".spark-filter-module__header, .spark-filter__header"));
 
   const inToolbar = (el: HTMLElement) => {
     let node: HTMLElement | null = el.parentElement;
@@ -3074,9 +3067,9 @@ const TAG_SYNXIS_HK_TOOLBAR_FN = () => {
   const candidates: Array<{ el: HTMLElement; area: number; clickable: boolean }> = [];
   for (const el of nodes) {
     const text = normalize(el.innerText || el.textContent || "");
-    if (!/^housekeeping\s*status$/i.test(text)) continue;
+    if (text.length > 40 || !/^housekeeping\s*status\b/i.test(text)) continue;
     if (el.closest("thead, th, [role='columnheader']")) continue;
-    if (isFilter(el)) continue;
+    if (isFilterHeader(el)) continue;
     const toolbar = inToolbar(el);
     const disabled = disabledOf(el);
     if (hits.length < 8) {
@@ -3267,22 +3260,30 @@ async function markSynxisRoomClean(
     if (!found.found) continue;
     const box = root.locator("[data-hk-check='1']").first();
     if ((await box.count().catch(() => 0)) === 0) continue;
-    const type = ((await box.getAttribute("type").catch(() => null)) || "").toLowerCase();
-    if (type === "checkbox") {
-      await box.check({ force: true }).catch(async () => {
-        await box.click({ force: true });
-      });
-    } else {
+    await box.scrollIntoViewIfNeeded().catch(() => undefined);
+    await box.click({ timeout: 3_000 }).catch(async () => {
       await box.click({ force: true });
-    }
-    const checked = await box.isChecked().catch(() => null);
-    if (checked === false) {
+    });
+    const selected = await box
+      .evaluate((el) => {
+        const input = el as HTMLInputElement;
+        const checked = input.checked === true || el.getAttribute("aria-checked") === "true";
+        const row = el.closest("tr, [role='row']") as HTMLElement | null;
+        const cls = `${row?.className || ""} ${el.className || ""} ${el.parentElement?.className || ""}`;
+        const highlighted =
+          row?.getAttribute("aria-selected") === "true" ||
+          el.getAttribute("aria-checked") === "true" ||
+          /selected|highlight|k-state-selected|is-selected|row-selected/i.test(cls);
+        return { checked, highlighted };
+      })
+      .catch(() => ({ checked: false, highlighted: false }));
+    if (!selected.checked) {
       const cell = box.locator("xpath=ancestor::td[1] | ancestor::*[@role='gridcell'][1]");
-      if ((await cell.count().catch(() => 0)) > 0) await cell.click({ force: true }).catch(() => undefined);
+      if ((await cell.count().catch(() => 0)) > 0) await cell.click({ timeout: 2_000 }).catch(() => undefined);
       else await box.click({ force: true }).catch(() => undefined);
     }
     tagged = true;
-    synxisLog("write:step", { step: 1, action: "checkbox", roomNumber, checked });
+    synxisLog("write:step", { step: 1, action: "checkbox-in-front-of-room", roomNumber, ...selected });
     if (process.env.PLAYWRIGHT_HEADED === "1") await new Promise((r) => setTimeout(r, 1200));
     break;
   }
