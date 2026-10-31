@@ -164,18 +164,46 @@ async function loadPlaywright() {
   }
 }
 
-async function launchBrowser(chromium: Awaited<ReturnType<typeof loadPlaywright>>["chromium"]) {
+const CHROME_USER_AGENT =
+  "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
+
+type LaunchedBrowser = {
+  browser: import("playwright").Browser;
+  /** Omit on Firefox so SynXis sees Firefox's own user agent. */
+  userAgent?: string;
+};
+
+async function launchBrowser(): Promise<LaunchedBrowser> {
   assertPlaywrightHost();
-  const args = ["--disable-dev-shm-usage", "--disable-http2", "--disable-features=IsolateOrigins,site-per-process"];
   const extras = playwrightLaunchExtras();
-  const preferBundled =
-    process.env.PLAYWRIGHT_DOCKER === "1" || process.env.PLAYWRIGHT_CHROMIUM_ONLY === "1";
-  const launchBundled = () => chromium.launch({ ...extras, args });
-  if (preferBundled) return launchBundled();
+  const pw = await loadPlaywright();
+  const showWindow = extras.headless === false;
+
+  // Hosted agent: Firefox, same as SkyTouch.
+  if (process.env.PLAYWRIGHT_DOCKER === "1" && process.env.PLAYWRIGHT_CHROMIUM_ONLY !== "1") {
+    synxisLog("browser-launch", { browser: showWindow ? "firefox-headed" : "firefox" });
+    try {
+      const browser = await pw.firefox.launch({ ...extras });
+      return { browser };
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      synxisLog("browser-launch", { error: message.slice(0, 300) });
+      throw new Error(`browser-launch: ${message}`);
+    }
+  }
+
+  const args = ["--disable-dev-shm-usage", "--disable-http2", "--disable-features=IsolateOrigins,site-per-process"];
+  const preferBundled = process.env.PLAYWRIGHT_CHROMIUM_ONLY === "1";
+  const launchBundled = () => pw.chromium.launch({ ...extras, args });
+  synxisLog("browser-launch", { browser: showWindow ? "chromium-headed" : "chromium" });
+  if (preferBundled) return { browser: await launchBundled(), userAgent: CHROME_USER_AGENT };
   try {
-    return await chromium.launch({ ...extras, channel: "chrome", args });
+    return {
+      browser: await pw.chromium.launch({ ...extras, channel: "chrome", args }),
+      userAgent: CHROME_USER_AGENT,
+    };
   } catch {
-    return launchBundled();
+    return { browser: await launchBundled(), userAgent: CHROME_USER_AGENT };
   }
 }
 
@@ -2710,8 +2738,7 @@ export async function collectSynxisHousekeepingReport(input: {
   const downloadDir = path.join(tmpdir(), `synxis-hk-${randomUUID()}`);
   await mkdir(downloadDir, { recursive: true });
 
-  const { chromium } = await loadPlaywright();
-  const browser = await launchBrowser(chromium);
+  const { browser, userAgent } = await launchBrowser();
   let storageStateJson: string | null = null;
   let rotatedPassword: string | null = null;
 
@@ -2722,8 +2749,7 @@ export async function collectSynxisHousekeepingReport(input: {
       acceptDownloads: true,
       ignoreHTTPSErrors: true,
       viewport: { width: 1400, height: 900 },
-      userAgent:
-        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+      ...(userAgent ? { userAgent } : {}),
       ...(useSession ? { storageState: parseStorageState(input.auth?.storageStateJson) } : {}),
     });
     const page = await context.newPage();
@@ -3260,8 +3286,7 @@ export async function writeSynxisRoomsClean(input: {
 
   const selectors = mergeSelectors(input.selectorsJson);
   const timeout = input.timeoutMs ?? 60_000;
-  const { chromium } = await loadPlaywright();
-  const browser = await launchBrowser(chromium);
+  const { browser, userAgent } = await launchBrowser();
   const uniqueRooms = [...new Set(input.roomNumbers.map((r) => r.trim()).filter(Boolean))];
   const results: SynxisBoardWriteResult["rooms"] = [];
   let storageStateJson: string | null = null;
@@ -3273,8 +3298,7 @@ export async function writeSynxisRoomsClean(input: {
     const context = await browser.newContext({
       ignoreHTTPSErrors: true,
       viewport: { width: 1400, height: 900 },
-      userAgent:
-        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+      ...(userAgent ? { userAgent } : {}),
       ...(useSession ? { storageState: parseStorageState(input.auth?.storageStateJson) } : {}),
     });
     const page = await context.newPage();
