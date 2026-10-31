@@ -203,11 +203,8 @@ const CHROME_USER_AGENT =
   "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
 
 /**
- * Playwright's default headless browser is chrome-headless-shell. SkyTouch's
- * Akamai edge resets that client's HTTP/2 and never answers HTTP/1.1, so
- * Login.do stays on about:blank. Full Chromium in new headless mode receives
- * the login form (User ID + Password) from Railway with no proxy.
- * headless:false selects that full binary; --headless=new keeps it invisible.
+ * Local Chrome uses full Chromium in new headless mode. Railway does not:
+ * SkyTouch's Akamai edge resets Chromium and returns the login form to Firefox.
  */
 function skyTouchLaunchArgs(showWindow: boolean) {
   const args = ["--disable-dev-shm-usage", "--disable-blink-features=AutomationControlled"];
@@ -215,12 +212,38 @@ function skyTouchLaunchArgs(showWindow: boolean) {
   return args;
 }
 
-async function launchBrowser(chromium: Awaited<ReturnType<typeof loadPlaywright>>["chromium"]) {
+type LaunchedBrowser = {
+  browser: import("playwright").Browser;
+  /** Omit on Firefox so SkyTouch sees Firefox's own user agent. */
+  userAgent?: string;
+};
+
+async function launchBrowser(): Promise<LaunchedBrowser> {
   assertPlaywrightHost();
   const extras = playwrightLaunchExtras();
   const showWindow = extras.headless === false;
-  const args = skyTouchLaunchArgs(showWindow);
   const proxy = playwrightProxy();
+  const pw = await loadPlaywright();
+
+  // Hosted agent: Firefox. Akamai answers it from Railway and rejects Chromium.
+  if (process.env.PLAYWRIGHT_DOCKER === "1" && process.env.PLAYWRIGHT_CHROMIUM_ONLY !== "1") {
+    agentLog(
+      "step=browser-launch",
+      `browser=firefox${showWindow ? "-headed" : ""}${proxy ? ` proxy=${proxy.server}` : ""}`
+    );
+    try {
+      const browser = await pw.firefox.launch({
+        ...extras,
+        ...(proxy ? { proxy } : {}),
+      });
+      return { browser };
+    } catch (err) {
+      agentLog("step=browser-launch", `FAIL ${shortenAgentError(err)}`);
+      throw new Error(`browser-launch: ${shortenAgentError(err)}`);
+    }
+  }
+
+  const args = skyTouchLaunchArgs(showWindow);
   agentLog(
     "step=browser-launch",
     `${showWindow ? "browser=chromium-headed" : "browser=chromium-headless-new"}${proxy ? ` proxy=${proxy.server}` : ""}`
@@ -231,16 +254,12 @@ async function launchBrowser(chromium: Awaited<ReturnType<typeof loadPlaywright>
     args,
     ...(proxy ? { proxy } : {}),
   };
-
-  // Docker / hosted agent: bundled full Chromium. Local Mac: installed Chrome.
-  const preferBundled =
-    process.env.PLAYWRIGHT_DOCKER === "1" || process.env.PLAYWRIGHT_CHROMIUM_ONLY === "1";
-
-  const launchBundled = () => chromium.launch(launchOptions);
+  const preferBundled = process.env.PLAYWRIGHT_CHROMIUM_ONLY === "1";
+  const launchBundled = () => pw.chromium.launch(launchOptions);
 
   if (preferBundled) {
     try {
-      return await launchBundled();
+      return { browser: await launchBundled(), userAgent: CHROME_USER_AGENT };
     } catch (err) {
       agentLog("step=browser-launch", `FAIL ${shortenAgentError(err)}`);
       throw new Error(`browser-launch: ${shortenAgentError(err)}`);
@@ -248,10 +267,11 @@ async function launchBrowser(chromium: Awaited<ReturnType<typeof loadPlaywright>
   }
 
   try {
-    return await chromium.launch({
+    const browser = await pw.chromium.launch({
       ...launchOptions,
       channel: "chrome",
     });
+    return { browser, userAgent: CHROME_USER_AGENT };
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     if (/Executable doesn't exist|browserType\.launch/i.test(message)) {
@@ -260,7 +280,7 @@ async function launchBrowser(chromium: Awaited<ReturnType<typeof loadPlaywright>
       );
     }
     try {
-      return await launchBundled();
+      return { browser: await launchBundled(), userAgent: CHROME_USER_AGENT };
     } catch (fallbackErr) {
       const fallback = fallbackErr instanceof Error ? fallbackErr.message : String(fallbackErr);
       throw new Error(
@@ -891,20 +911,19 @@ export async function collectSkyTouchHousekeepingReport(input: {
   timeoutMs?: number;
 }): Promise<PortalCollectResult> {
   const loginUrl = normalizeSkyTouchLoginUrl(input.loginUrl);
-  const { chromium } = await loadPlaywright();
   const selectors = mergeSelectors(input.selectorsJson);
   const timeout = input.timeoutMs ?? 60_000;
   const downloadDir = path.join(tmpdir(), `hk-pms-${randomUUID()}`);
   await mkdir(downloadDir, { recursive: true });
 
-  const browser = await launchBrowser(chromium);
+  const { browser, userAgent } = await launchBrowser();
 
   try {
     const context = await browser.newContext({
       acceptDownloads: true,
       ignoreHTTPSErrors: true,
       viewport: { width: 1400, height: 900 },
-      userAgent: CHROME_USER_AGENT,
+      ...(userAgent ? { userAgent } : {}),
     });
     const page = await context.newPage();
     page.setDefaultTimeout(timeout);
@@ -1148,16 +1167,15 @@ export async function writeSkyTouchBoardConditions(input: {
   const loginUrl = normalizeSkyTouchLoginUrl(input.loginUrl);
   const roomsLabel = input.updates.map((row) => row.roomNumber).join(",");
   agentLog("step=write", `start rooms=${roomsLabel} url=${loginUrl}`);
-  const { chromium } = await loadPlaywright();
   const selectors = mergeSelectors(input.selectorsJson);
   const timeout = input.timeoutMs ?? 60_000;
-  const browser = await launchBrowser(chromium);
+  const { browser, userAgent } = await launchBrowser();
 
   try {
     const context = await browser.newContext({
       ignoreHTTPSErrors: true,
       viewport: { width: 1400, height: 900 },
-      userAgent: CHROME_USER_AGENT,
+      ...(userAgent ? { userAgent } : {}),
     });
     const page = await context.newPage();
     page.setDefaultTimeout(timeout);
