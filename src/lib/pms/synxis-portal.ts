@@ -3004,53 +3004,103 @@ async function controlIsDisabled(el: import("playwright").Locator) {
     .catch(() => false);
 }
 
-/** After the room checkbox is on, the Housekeeping Status menu can be clicked. */
+/**
+ * Step 2 on the Room Status toolbar (not the column header):
+ * HOUSEKEEPING STATUS sits beside OCCUPANCY STATUS and MANAGE ASSIGNMENTS.
+ * It stays disabled until a room checkbox is checked.
+ */
+const TAG_SYNXIS_HK_TOOLBAR_FN = () => {
+  const normalize = (s: string) => (s || "").replace(/\u00a0/g, " ").replace(/\s+/g, " ").trim();
+  document.querySelectorAll("[data-hk-menu]").forEach((el) => el.removeAttribute("data-hk-menu"));
+
+  const disabledOf = (el: HTMLElement) =>
+    el.hasAttribute("disabled") ||
+    el.getAttribute("aria-disabled") === "true" ||
+    /\b(disabled|k-disabled|k-state-disabled|is-disabled)\b/i.test(String(el.className || ""));
+
+  const hits: Array<{ tag: string; toolbar: boolean; disabled: boolean; text: string }> = [];
+  const nodes = Array.from(document.querySelectorAll("button, a, [role='button'], div, span, li")) as HTMLElement[];
+  let chosen: HTMLElement | null = null;
+  for (const el of nodes) {
+    const text = normalize(el.innerText || el.textContent || "");
+    if (!/^housekeeping\s*status$/i.test(text)) continue;
+    if (el.closest("thead, th, [role='columnheader']")) continue;
+    const parent = normalize(el.parentElement?.innerText || "");
+    const toolbar = /occupancy\s*status/i.test(parent) && /manage\s*assignments|out\s*of\s*order/i.test(parent);
+    const disabled = disabledOf(el);
+    if (hits.length < 8) hits.push({ tag: el.tagName, toolbar, disabled, text: text.slice(0, 40) });
+    if (disabled) continue;
+    if (toolbar) {
+      chosen = el;
+      break;
+    }
+    if (!chosen) chosen = el;
+  }
+  if (!chosen) return { found: false as const, hits };
+  chosen.setAttribute("data-hk-menu", "1");
+  return { found: true as const, hits };
+};
+
+/** After the room checkbox is on, click the HOUSEKEEPING STATUS toolbar button. */
 async function clickHousekeepingStatusMenu(page: import("playwright").Page) {
   const deadline = Date.now() + 8_000;
+  let lastHits: unknown = [];
   while (Date.now() < deadline) {
     for (const root of synxisDomRoots(page)) {
-      const buttons = root.locator("button, a, [role='button'], [role='menuitem'], span, li").filter({
-        hasText: /^\s*housekeeping\s*status\s*$/i,
-      });
-      const n = Math.min(await buttons.count().catch(() => 0), 6);
-      for (let i = 0; i < n; i++) {
-        const el = buttons.nth(i);
-        if (!(await el.isVisible().catch(() => false))) continue;
-        if (await controlIsDisabled(el)) continue;
-        await el.click({ timeout: 4_000 });
-        return true;
-      }
+      const tagged = await root.evaluate(TAG_SYNXIS_HK_TOOLBAR_FN).catch(() => ({ found: false as const, hits: [] }));
+      lastHits = tagged.hits;
+      if (!tagged.found) continue;
+      const button = root.locator("[data-hk-menu='1']").first();
+      if ((await button.count().catch(() => 0)) === 0) continue;
+      if (!(await button.isVisible().catch(() => false))) continue;
+      if (await controlIsDisabled(button)) continue;
+      await button.click({ timeout: 4_000 });
+      synxisLog("write:menu-target", { hits: tagged.hits });
+      return true;
     }
     await new Promise((r) => setTimeout(r, 400));
   }
+  synxisLog("write:menu-missing", { hits: lastHits });
   return false;
 }
+
+/**
+ * Step 3–4 window: title "Housekeeping Status", radios Clean and Dirty, buttons CANCEL and UPDATE.
+ */
+const TAG_SYNXIS_HK_DIALOG_FN = () => {
+  const normalize = (s: string) => (s || "").replace(/\u00a0/g, " ").replace(/\s+/g, " ").trim();
+  document.querySelectorAll("[data-hk-dialog]").forEach((el) => el.removeAttribute("data-hk-dialog"));
+  const nodes = Array.from(document.querySelectorAll("div, section, form, [role='dialog']")) as HTMLElement[];
+  let best: HTMLElement | null = null;
+  let bestArea = Number.POSITIVE_INFINITY;
+  for (const el of nodes) {
+    const text = normalize(el.innerText || "");
+    if (!/housekeeping\s*status/i.test(text)) continue;
+    if (!/\bclean\b/i.test(text) || !/\bdirty\b/i.test(text) || !/\bupdate\b/i.test(text)) continue;
+    const style = window.getComputedStyle(el);
+    if (style.display === "none" || style.visibility === "hidden") continue;
+    const rect = el.getBoundingClientRect();
+    if (rect.width < 180 || rect.height < 80 || rect.width > 900 || rect.height > 700) continue;
+    const area = rect.width * rect.height;
+    if (area < bestArea) {
+      best = el;
+      bestArea = area;
+    }
+  }
+  if (!best) return false;
+  best.setAttribute("data-hk-dialog", "1");
+  return true;
+};
 
 async function housekeepingChoiceWindow(page: import("playwright").Page) {
   const deadline = Date.now() + 6_000;
   while (Date.now() < deadline) {
     for (const root of synxisDomRoots(page)) {
-      const dialogs = root.locator(
-        "[role='dialog'], .k-window, .k-dialog, .modal, [class*='window' i], [class*='popup' i], [class*='modal' i]"
-      );
-      const n = await dialogs.count().catch(() => 0);
-      for (let i = n - 1; i >= 0; i--) {
-        const dialog = dialogs.nth(i);
-        if (!(await dialog.isVisible().catch(() => false))) continue;
-        const radios = await dialog.locator("input[type='radio']").count().catch(() => 0);
-        if (radios >= 1) return dialog;
-      }
-      const panels = root.locator("div, section, form");
-      const panelCount = Math.min(await panels.count().catch(() => 0), 40);
-      for (let i = panelCount - 1; i >= 0; i--) {
-        const panel = panels.nth(i);
-        if (!(await panel.isVisible().catch(() => false))) continue;
-        const radios = await panel.locator("input[type='radio']").count().catch(() => 0);
-        if (radios < 1) continue;
-        const box = await panel.boundingBox().catch(() => null);
-        if (!box || box.height < 40 || box.height > 720 || box.width > 900) continue;
-        const update = panel.getByRole("button", { name: /^\s*update\s*$/i });
-        if ((await update.count().catch(() => 0)) > 0) return panel;
+      const tagged = await root.evaluate(TAG_SYNXIS_HK_DIALOG_FN).catch(() => false);
+      if (!tagged) continue;
+      const dialog = root.locator("[data-hk-dialog='1']").first();
+      if ((await dialog.count().catch(() => 0)) > 0 && (await dialog.isVisible().catch(() => false))) {
+        return dialog;
       }
     }
     await new Promise((r) => setTimeout(r, 300));
@@ -3126,8 +3176,11 @@ async function synxisRoomHousekeeping(page: import("playwright").Page, roomNumbe
 }
 
 /**
- * Room Status write-back:
- * check the room's box, open Housekeeping Status, choose the Clean radio, click Update.
+ * Room Status write-back, in the order shown on the board:
+ * 1. Check the room's checkbox.
+ * 2. Click the HOUSEKEEPING STATUS toolbar button.
+ * 3. In the Housekeeping Status window, select the Clean radio.
+ * 4. Click UPDATE.
  */
 async function markSynxisRoomClean(
   page: import("playwright").Page,
@@ -3149,8 +3202,14 @@ async function markSynxisRoomClean(
     } else {
       await box.click({ force: true });
     }
+    const checked = await box.isChecked().catch(() => null);
+    if (checked === false) {
+      const cell = box.locator("xpath=ancestor::td[1] | ancestor::*[@role='gridcell'][1]");
+      if ((await cell.count().catch(() => 0)) > 0) await cell.click({ force: true }).catch(() => undefined);
+      else await box.click({ force: true }).catch(() => undefined);
+    }
     tagged = true;
-    synxisLog("write:checkbox", { roomNumber });
+    synxisLog("write:checkbox", { roomNumber, checked });
     break;
   }
 
