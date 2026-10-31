@@ -115,7 +115,7 @@ Split by PMS first, then by hotel slot. Leave `PMS_AGENT_PROVIDERS` unset on the
 
 `SLOT` is `0 .. SLOTS-1`. The worker owns a hotel when `hash(hotelId) % SLOTS == SLOT`. Writes for other slots stay pending for the worker that owns them.
 
-SkyTouch must run on a host that can open `https://www.skytouchhos.com/pms/Login.do`. The current Railway host is blocked before the login page loads. SynXis can stay on Railway.
+SkyTouch and SynXis both run on Railway. SkyTouch uses full Chromium in new headless mode so Akamai returns `Login.do`. The separate `chrome-headless-shell` binary does not receive that page.
 
 Vercel already sits in front of the app. Each serverless function opens one Postgres connection (`connection_limit=1`). Put a pooler in front of Postgres before the hotel count gets large. SynXis official Rooms API waits until Aven grants access; those hotels then leave the browser pool.
 

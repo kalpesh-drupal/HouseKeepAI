@@ -2920,6 +2920,182 @@ export type SynxisBoardWriteResult = {
   rotatedPassword?: string | null;
 };
 
+/**
+ * Set one room's Housekeeping Status dropdown to Clean.
+ * The room number is often a link that is not the first anchor in the row,
+ * and the Clean/Dirty <select> can sit in a frozen sibling table at the same index.
+ */
+const MARK_SYNXIS_ROOM_CLEAN_FN = (room: string) => {
+  const normalize = (s: string) => (s || "").replace(/\s+/g, " ").trim();
+  const fold = (s: string) => normalize(s).replace(/^0+(?=\d)/, "");
+  const want = fold(room);
+  const roomRe = /^[A-Za-z]{0,3}\d{1,5}[A-Za-z]?$/;
+  const rowSel =
+    "table tbody tr, table tr, [role='row'], .k-grid-content tr, .k-grid-content-locked tr, .k-master-row, .dx-data-row, .ag-row";
+
+  const isRoomToken = (raw: string) => {
+    const t = fold(raw);
+    if (!t || t.length > 12 || !roomRe.test(t)) return false;
+    return t === want;
+  };
+
+  const roomOf = (tr: HTMLElement) => {
+    const links = Array.from(tr.querySelectorAll("a"));
+    for (const link of links) {
+      const text = link.textContent || "";
+      if (isRoomToken(text)) return fold(text);
+    }
+    const cells = Array.from(
+      tr.querySelectorAll("td, th, [role='cell'], [role='gridcell'], [col-id]")
+    ) as HTMLElement[];
+    for (const cell of cells) {
+      if (isRoomToken(cell.innerText || "")) return fold(cell.innerText || "");
+      if (isRoomToken(cell.getAttribute("title") || "")) return fold(cell.getAttribute("title") || "");
+      const first = fold(cell.innerText || "").split(" ")[0] || "";
+      if (isRoomToken(first)) return first;
+    }
+    return "";
+  };
+
+  const setClean = (tr: HTMLElement) => {
+    const selects = Array.from(tr.querySelectorAll("select")) as HTMLSelectElement[];
+    const hk =
+      selects.find((sel) => {
+        const texts = Array.from(sel.options).map((o) => normalize(o.textContent || ""));
+        return texts.some((t) => /^clean$/i.test(t)) && texts.some((t) => /^dirty$/i.test(t));
+      }) ||
+      selects.find((sel) =>
+        Array.from(sel.options).some((o) => /^clean$/i.test(normalize(o.textContent || "")))
+      );
+    if (!hk) return { ok: false, error: "no-select" as const };
+    const opt = Array.from(hk.options).find((o) => /^clean$/i.test(normalize(o.textContent || "")));
+    if (!opt) return { ok: false, error: "Clean option not in housekeeping dropdown" };
+    const descriptor = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, "value");
+    descriptor?.set?.call(hk, opt.value);
+    opt.selected = true;
+    hk.dispatchEvent(new Event("input", { bubbles: true }));
+    hk.dispatchEvent(new Event("change", { bubbles: true }));
+    const jq = (window as unknown as { jQuery?: (el: Element) => { val: (v: string) => { trigger: (e: string) => void } } })
+      .jQuery;
+    if (typeof jq === "function") {
+      try {
+        jq(hk).val(opt.value).trigger("change");
+      } catch {
+        // Native change event above is enough when jQuery is not wired to this select.
+      }
+    }
+    const after = normalize(hk.selectedOptions?.[0]?.textContent || "");
+    if (!/^clean$/i.test(after)) {
+      return { ok: false, error: `Dropdown stayed on ${after || "unknown"}` };
+    }
+    return { ok: true as const };
+  };
+
+  const rows = Array.from(document.querySelectorAll(rowSel)) as HTMLElement[];
+  for (const tr of rows) {
+    if (roomOf(tr) !== want) continue;
+    const direct = setClean(tr);
+    if (direct.ok || direct.error !== "no-select") return direct;
+
+    const table = tr.closest("table");
+    const index = table ? Array.from(table.querySelectorAll("tbody tr")).indexOf(tr as HTMLTableRowElement) : -1;
+    const tables = Array.from(document.querySelectorAll("table"));
+    if (index >= 0) {
+      for (const other of tables) {
+        if (other === table) continue;
+        const otherRow = other.querySelectorAll("tbody tr")[index] as HTMLElement | undefined;
+        if (!otherRow) continue;
+        const sibling = setClean(otherRow);
+        if (sibling.ok || sibling.error !== "no-select") return sibling;
+      }
+    }
+    return { ok: false, error: "Housekeeping status dropdown not found for room" };
+  }
+  return { ok: false, error: "Room not found on SynXis board" };
+};
+
+async function chooseCleanOption(select: import("playwright").Locator) {
+  const labels = (await select.locator("option").allTextContents().catch(() => [] as string[])).map((t) =>
+    t.replace(/\s+/g, " ").trim()
+  );
+  const clean = labels.find((t) => /^clean$/i.test(t));
+  if (!clean) return false;
+  const picked = await select
+    .selectOption({ label: clean })
+    .then(() => true)
+    .catch(() => false);
+  if (!picked) return false;
+  const after = ((await select.locator("option:checked").textContent().catch(() => "")) || "")
+    .replace(/\s+/g, " ")
+    .trim();
+  return /^clean$/i.test(after);
+}
+
+/** Locator path: same room links the grid check already sees, including a frozen column. */
+async function markSynxisRoomCleanByLocator(
+  root: import("playwright").Page | import("playwright").Frame,
+  roomNumber: string
+): Promise<{ ok: boolean; error?: string } | null> {
+  const want = roomNumber.trim().replace(/^0+(?=\d)/, "");
+  const links = root.locator("a");
+  const n = Math.min(await links.count().catch(() => 0), 500);
+  for (let i = 0; i < n; i++) {
+    const text = (
+      (await links.nth(i).evaluate((el) => el.textContent || "").catch(() => "")) || ""
+    )
+      .replace(/\s+/g, " ")
+      .trim()
+      .replace(/^0+(?=\d)/, "");
+    if (!/^[A-Za-z]{0,3}\d{1,5}[A-Za-z]?$/.test(text) || text !== want) continue;
+
+    const link = links.nth(i);
+    const row = link.locator("xpath=ancestor::tr[1]");
+    if ((await row.count().catch(() => 0)) === 0) continue;
+
+    const selects = row.locator("select");
+    const selectCount = await selects.count().catch(() => 0);
+    for (let s = 0; s < selectCount; s++) {
+      if (await chooseCleanOption(selects.nth(s))) return { ok: true };
+    }
+
+    const index = await link
+      .evaluate((a) => {
+        const tr = a.closest("tr");
+        const table = tr?.closest("table");
+        if (!tr || !table) return -1;
+        return Array.from(table.querySelectorAll("tbody tr")).indexOf(tr as HTMLTableRowElement);
+      })
+      .catch(() => -1);
+    if (index >= 0) {
+      const tables = root.locator("table");
+      const tableCount = await tables.count().catch(() => 0);
+      for (let t = 0; t < tableCount; t++) {
+        const paired = tables.nth(t).locator("tbody tr").nth(index).locator("select");
+        const pairedCount = await paired.count().catch(() => 0);
+        for (let s = 0; s < pairedCount; s++) {
+          if (await chooseCleanOption(paired.nth(s))) return { ok: true };
+        }
+      }
+    }
+
+    const statusCell = row.locator("td, [role='gridcell']").filter({ hasText: /^(Dirty|Clean|Inspected|Pick\s*up)$/i });
+    if ((await statusCell.count().catch(() => 0)) > 0) {
+      await statusCell.first().click({ timeout: 3_000 }).catch(() => undefined);
+      await new Promise((r) => setTimeout(r, 400));
+      const option = root
+        .locator("[role='option'], li, a, span")
+        .filter({ hasText: /^\s*Clean\s*$/ })
+        .first();
+      if ((await option.count().catch(() => 0)) > 0 && (await option.isVisible().catch(() => false))) {
+        await option.click({ timeout: 3_000 }).catch(() => undefined);
+        return { ok: true };
+      }
+    }
+    return { ok: false, error: "Housekeeping status dropdown not found for room" };
+  }
+  return null;
+}
+
 /** Set one room's Housekeeping Status dropdown to Clean. The grid lives in an iframe. */
 async function markSynxisRoomClean(
   page: import("playwright").Page,
@@ -2927,64 +3103,29 @@ async function markSynxisRoomClean(
 ): Promise<{ ok: boolean; error?: string }> {
   let sawDropdownMiss = "";
   for (const root of synxisDomRoots(page)) {
-    const result = await root
-      .evaluate((room) => {
-        const normalize = (s: string) => s.replace(/\s+/g, " ").trim();
-        const want = normalize(room);
-        const rows = Array.from(
-          document.querySelectorAll(
-            "table tbody tr, table tr, [role='row'], .k-grid-content tr, .k-master-row, .dx-data-row"
-          )
-        ) as HTMLElement[];
-        let row: HTMLElement | null = null;
-        for (const tr of rows) {
-          const link = tr.querySelector("a");
-          const linkText = normalize(link?.textContent || "");
-          if (linkText === want) {
-            row = tr;
-            break;
-          }
-          const cells = Array.from(tr.querySelectorAll("td, [role='cell'], [role='gridcell']")).map((c) =>
-            normalize((c as HTMLElement).innerText || "")
-          );
-          if (cells.some((c) => c === want)) {
-            row = tr;
-            break;
-          }
-        }
-        if (!row) return { ok: false, error: "Room not found on SynXis board" };
-
-        const selects = Array.from(row.querySelectorAll("select")) as HTMLSelectElement[];
-        const hk =
-          selects.find((sel) => {
-            const texts = Array.from(sel.options).map((o) => normalize(o.textContent || ""));
-            return texts.some((t) => /^clean$/i.test(t)) && texts.some((t) => /^dirty$/i.test(t));
-          }) ||
-          selects.find((sel) =>
-            Array.from(sel.options).some((o) => /^clean$/i.test(normalize(o.textContent || "")))
-          );
-        if (!hk) return { ok: false, error: "Housekeeping status dropdown not found for room" };
-
-        const opt = Array.from(hk.options).find((o) => /^clean$/i.test(normalize(o.textContent || "")));
-        if (!opt) return { ok: false, error: "Clean option not in housekeeping dropdown" };
-        hk.value = opt.value;
-        opt.selected = true;
-        hk.dispatchEvent(new Event("input", { bubbles: true }));
-        hk.dispatchEvent(new Event("change", { bubbles: true }));
-        const after = normalize(hk.selectedOptions?.[0]?.textContent || "");
-        if (!/^clean$/i.test(after)) {
-          return { ok: false, error: `Dropdown stayed on ${after || "unknown"}` };
-        }
-        return { ok: true };
-      }, roomNumber)
-      .catch(() => null);
-    if (!result) continue;
+    const result = await root.evaluate(MARK_SYNXIS_ROOM_CLEAN_FN, roomNumber).catch((err: unknown) => ({
+      ok: false as const,
+      error: err instanceof Error ? err.message : "Could not update the housekeeping dropdown",
+    }));
     if (result.ok) return { ok: true };
-    if (result.error && !/not found/i.test(result.error)) {
+    if (!result.ok) {
+      const viaLocator = await markSynxisRoomCleanByLocator(root, roomNumber).catch(() => null);
+      if (viaLocator?.ok) return { ok: true };
+      if (viaLocator?.error && viaLocator.error !== "no-select" && !/not found/i.test(viaLocator.error)) {
+        sawDropdownMiss = viaLocator.error;
+      }
+    }
+    if (result.error && result.error !== "no-select" && !/not found/i.test(result.error)) {
       sawDropdownMiss = result.error;
     }
   }
   if (sawDropdownMiss) return { ok: false, error: sawDropdownMiss };
+  const visible = (await scrapeBoardRows(page)).map((row) => row.roomNumber);
+  synxisLog("write:not-found", { roomNumber, visible: visible.slice(0, 15), visibleCount: visible.length });
+  const folded = (value: string) => value.trim().replace(/^0+(?=\d)/, "");
+  if (visible.some((n) => folded(n) === folded(roomNumber))) {
+    return { ok: false, error: "Housekeeping status dropdown not found for room" };
+  }
   return { ok: false, error: "Room not found on SynXis board" };
 }
 
@@ -3061,7 +3202,11 @@ export async function writeSynxisRoomsClean(input: {
     for (const roomNumber of uniqueRooms) {
       try {
         let outcome = await markSynxisRoomClean(boardPage, roomNumber);
-        for (let pageIdx = 0; !outcome.ok && /not found/i.test(outcome.error || "") && pageIdx < 6; pageIdx++) {
+        for (
+          let pageIdx = 0;
+          !outcome.ok && outcome.error === "Room not found on SynXis board" && pageIdx < 8;
+          pageIdx++
+        ) {
           const moved = await clickRoomStatusNextPage(boardPage);
           synxisLog("write:next-page", { roomNumber, pageIdx, moved });
           if (!moved) break;

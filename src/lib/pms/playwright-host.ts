@@ -35,7 +35,7 @@ export function playwrightHeadless(): boolean {
 }
 
 /**
- * Residential proxy for SkyTouch. Railway's own address never receives Login.do.
+ * Optional residential proxy for SkyTouch. Leave unset unless an edge stops answering.
  * PLAYWRIGHT_PROXY_SERVER=http://host:port
  * or http://user:pass@host:port
  * Username and password can also be PLAYWRIGHT_PROXY_USERNAME / PLAYWRIGHT_PROXY_PASSWORD.
