@@ -2921,212 +2921,270 @@ export type SynxisBoardWriteResult = {
 };
 
 /**
- * Set one room's Housekeeping Status dropdown to Clean.
- * The room number is often a link that is not the first anchor in the row,
- * and the Clean/Dirty <select> can sit in a frozen sibling table at the same index.
+ * Tag the checkbox on the room row collect already reads.
+ * The box can sit in a frozen column beside the room number.
  */
-const MARK_SYNXIS_ROOM_CLEAN_FN = (room: string) => {
-  const normalize = (s: string) => (s || "").replace(/\s+/g, " ").trim();
+const TAG_SYNXIS_ROOM_CHECKBOX_FN = (room: string) => {
+  const normalize = (s: string) => (s || "").replace(/\u00a0/g, " ").replace(/\s+/g, " ").trim();
   const fold = (s: string) => normalize(s).replace(/^0+(?=\d)/, "");
   const want = fold(room);
   const roomRe = /^[A-Za-z]{0,3}\d{1,5}[A-Za-z]?$/;
-  const rowSel =
-    "table tbody tr, table tr, [role='row'], .k-grid-content tr, .k-grid-content-locked tr, .k-master-row, .dx-data-row, .ag-row";
 
-  const isRoomToken = (raw: string) => {
+  document.querySelectorAll("[data-hk-check]").forEach((el) => el.removeAttribute("data-hk-check"));
+
+  const isRoom = (raw: string) => {
     const t = fold(raw);
-    if (!t || t.length > 12 || !roomRe.test(t)) return false;
-    return t === want;
+    return Boolean(t) && t.length <= 12 && roomRe.test(t) && t === want;
   };
 
-  const roomOf = (tr: HTMLElement) => {
-    const links = Array.from(tr.querySelectorAll("a"));
-    for (const link of links) {
-      const text = link.textContent || "";
-      if (isRoomToken(text)) return fold(text);
+  const rowHasRoom = (tr: HTMLElement) => {
+    for (const link of Array.from(tr.querySelectorAll("a"))) {
+      if (isRoom(link.textContent || "")) return true;
     }
-    const cells = Array.from(
-      tr.querySelectorAll("td, th, [role='cell'], [role='gridcell'], [col-id]")
-    ) as HTMLElement[];
+    const cells = Array.from(tr.querySelectorAll("td, [role='gridcell'], [role='cell']")) as HTMLElement[];
     for (const cell of cells) {
-      if (isRoomToken(cell.innerText || "")) return fold(cell.innerText || "");
-      if (isRoomToken(cell.getAttribute("title") || "")) return fold(cell.getAttribute("title") || "");
-      const first = fold(cell.innerText || "").split(" ")[0] || "";
-      if (isRoomToken(first)) return first;
+      const text = normalize(cell.innerText || "");
+      if (text.length <= 8 && isRoom(text)) return true;
     }
-    return "";
+    return false;
   };
 
-  const setClean = (tr: HTMLElement) => {
-    const selects = Array.from(tr.querySelectorAll("select")) as HTMLSelectElement[];
-    const hk =
-      selects.find((sel) => {
-        const texts = Array.from(sel.options).map((o) => normalize(o.textContent || ""));
-        return texts.some((t) => /^clean$/i.test(t)) && texts.some((t) => /^dirty$/i.test(t));
-      }) ||
-      selects.find((sel) =>
-        Array.from(sel.options).some((o) => /^clean$/i.test(normalize(o.textContent || "")))
-      );
-    if (!hk) return { ok: false, error: "no-select" as const };
-    const opt = Array.from(hk.options).find((o) => /^clean$/i.test(normalize(o.textContent || "")));
-    if (!opt) return { ok: false, error: "Clean option not in housekeeping dropdown" };
-    const descriptor = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, "value");
-    descriptor?.set?.call(hk, opt.value);
-    opt.selected = true;
-    hk.dispatchEvent(new Event("input", { bubbles: true }));
-    hk.dispatchEvent(new Event("change", { bubbles: true }));
-    const jq = (window as unknown as { jQuery?: (el: Element) => { val: (v: string) => { trigger: (e: string) => void } } })
-      .jQuery;
-    if (typeof jq === "function") {
-      try {
-        jq(hk).val(opt.value).trigger("change");
-      } catch {
-        // Native change event above is enough when jQuery is not wired to this select.
-      }
+  const checkboxIn = (tr: HTMLElement) => {
+    const input = tr.querySelector("input[type='checkbox']") as HTMLInputElement | null;
+    const label = `${input?.getAttribute("aria-label") || ""} ${input?.getAttribute("title") || ""}`;
+    if (input && !/select\s*all/i.test(label)) return input;
+    const role = tr.querySelector("[role='checkbox']") as HTMLElement | null;
+    if (role && !/select\s*all/i.test(`${role.getAttribute("aria-label") || ""} ${role.getAttribute("title") || ""}`)) {
+      return role;
     }
-    const after = normalize(hk.selectedOptions?.[0]?.textContent || "");
-    if (!/^clean$/i.test(after)) {
-      return { ok: false, error: `Dropdown stayed on ${after || "unknown"}` };
-    }
-    return { ok: true as const };
+    return null;
   };
 
-  const rows = Array.from(document.querySelectorAll(rowSel)) as HTMLElement[];
+  const rows = Array.from(
+    document.querySelectorAll("table tbody tr, [role='row'], .k-master-row, .dx-data-row, .ag-row")
+  ) as HTMLElement[];
   for (const tr of rows) {
-    if (roomOf(tr) !== want) continue;
-    const direct = setClean(tr);
-    if (direct.ok || direct.error !== "no-select") return direct;
-
+    if (!rowHasRoom(tr)) continue;
     const table = tr.closest("table");
     const index = table ? Array.from(table.querySelectorAll("tbody tr")).indexOf(tr as HTMLTableRowElement) : -1;
-    const tables = Array.from(document.querySelectorAll("table"));
+    const candidates: HTMLElement[] = [tr];
     if (index >= 0) {
-      for (const other of tables) {
-        if (other === table) continue;
-        const otherRow = other.querySelectorAll("tbody tr")[index] as HTMLElement | undefined;
-        if (!otherRow) continue;
-        const sibling = setClean(otherRow);
-        if (sibling.ok || sibling.error !== "no-select") return sibling;
-      }
+      document.querySelectorAll("table").forEach((other) => {
+        if (other === table) return;
+        const twin = other.querySelectorAll("tbody tr")[index];
+        if (twin instanceof HTMLElement) candidates.push(twin);
+      });
     }
-    return { ok: false, error: "Housekeeping status dropdown not found for room" };
+    for (const candidate of candidates) {
+      const box = checkboxIn(candidate);
+      if (!box) continue;
+      box.setAttribute("data-hk-check", "1");
+      return { found: true as const };
+    }
+    const firstCell = (tr.querySelector("td, [role='gridcell']") || candidates[0]) as HTMLElement | null;
+    if (firstCell) {
+      firstCell.setAttribute("data-hk-check", "1");
+      return { found: true as const, cell: true as const };
+    }
   }
-  return { ok: false, error: "Room not found on SynXis board" };
+  return { found: false as const };
 };
 
-async function chooseCleanOption(select: import("playwright").Locator) {
-  const labels = (await select.locator("option").allTextContents().catch(() => [] as string[])).map((t) =>
-    t.replace(/\s+/g, " ").trim()
-  );
-  const clean = labels.find((t) => /^clean$/i.test(t));
-  if (!clean) return false;
-  const picked = await select
-    .selectOption({ label: clean })
-    .then(() => true)
+async function controlIsDisabled(el: import("playwright").Locator) {
+  return el
+    .evaluate((node) => {
+      const host = (node.closest("button, a, [role='button'], [role='menuitem']") as HTMLElement | null) || (node as HTMLElement);
+      const cls = `${host.className || ""}`;
+      return (
+        host.hasAttribute("disabled") ||
+        host.getAttribute("aria-disabled") === "true" ||
+        /\b(disabled|k-disabled|k-state-disabled)\b/i.test(cls)
+      );
+    })
     .catch(() => false);
-  if (!picked) return false;
-  const after = ((await select.locator("option:checked").textContent().catch(() => "")) || "")
-    .replace(/\s+/g, " ")
-    .trim();
-  return /^clean$/i.test(after);
 }
 
-/** Locator path: same room links the grid check already sees, including a frozen column. */
-async function markSynxisRoomCleanByLocator(
-  root: import("playwright").Page | import("playwright").Frame,
-  roomNumber: string
-): Promise<{ ok: boolean; error?: string } | null> {
-  const want = roomNumber.trim().replace(/^0+(?=\d)/, "");
-  const links = root.locator("a");
-  const n = Math.min(await links.count().catch(() => 0), 500);
-  for (let i = 0; i < n; i++) {
-    const text = (
-      (await links.nth(i).evaluate((el) => el.textContent || "").catch(() => "")) || ""
-    )
-      .replace(/\s+/g, " ")
-      .trim()
-      .replace(/^0+(?=\d)/, "");
-    if (!/^[A-Za-z]{0,3}\d{1,5}[A-Za-z]?$/.test(text) || text !== want) continue;
-
-    const link = links.nth(i);
-    const row = link.locator("xpath=ancestor::tr[1]");
-    if ((await row.count().catch(() => 0)) === 0) continue;
-
-    const selects = row.locator("select");
-    const selectCount = await selects.count().catch(() => 0);
-    for (let s = 0; s < selectCount; s++) {
-      if (await chooseCleanOption(selects.nth(s))) return { ok: true };
-    }
-
-    const index = await link
-      .evaluate((a) => {
-        const tr = a.closest("tr");
-        const table = tr?.closest("table");
-        if (!tr || !table) return -1;
-        return Array.from(table.querySelectorAll("tbody tr")).indexOf(tr as HTMLTableRowElement);
-      })
-      .catch(() => -1);
-    if (index >= 0) {
-      const tables = root.locator("table");
-      const tableCount = await tables.count().catch(() => 0);
-      for (let t = 0; t < tableCount; t++) {
-        const paired = tables.nth(t).locator("tbody tr").nth(index).locator("select");
-        const pairedCount = await paired.count().catch(() => 0);
-        for (let s = 0; s < pairedCount; s++) {
-          if (await chooseCleanOption(paired.nth(s))) return { ok: true };
-        }
+/** After the room checkbox is on, the Housekeeping Status menu can be clicked. */
+async function clickHousekeepingStatusMenu(page: import("playwright").Page) {
+  const deadline = Date.now() + 8_000;
+  while (Date.now() < deadline) {
+    for (const root of synxisDomRoots(page)) {
+      const buttons = root.locator("button, a, [role='button'], [role='menuitem'], span, li").filter({
+        hasText: /^\s*housekeeping\s*status\s*$/i,
+      });
+      const n = Math.min(await buttons.count().catch(() => 0), 6);
+      for (let i = 0; i < n; i++) {
+        const el = buttons.nth(i);
+        if (!(await el.isVisible().catch(() => false))) continue;
+        if (await controlIsDisabled(el)) continue;
+        await el.click({ timeout: 4_000 });
+        return true;
       }
     }
+    await new Promise((r) => setTimeout(r, 400));
+  }
+  return false;
+}
 
-    const statusCell = row.locator("td, [role='gridcell']").filter({ hasText: /^(Dirty|Clean|Inspected|Pick\s*up)$/i });
-    if ((await statusCell.count().catch(() => 0)) > 0) {
-      await statusCell.first().click({ timeout: 3_000 }).catch(() => undefined);
-      await new Promise((r) => setTimeout(r, 400));
-      const option = root
-        .locator("[role='option'], li, a, span")
-        .filter({ hasText: /^\s*Clean\s*$/ })
-        .first();
-      if ((await option.count().catch(() => 0)) > 0 && (await option.isVisible().catch(() => false))) {
-        await option.click({ timeout: 3_000 }).catch(() => undefined);
-        return { ok: true };
+async function housekeepingChoiceWindow(page: import("playwright").Page) {
+  const deadline = Date.now() + 6_000;
+  while (Date.now() < deadline) {
+    for (const root of synxisDomRoots(page)) {
+      const dialogs = root.locator(
+        "[role='dialog'], .k-window, .k-dialog, .modal, [class*='window' i], [class*='popup' i], [class*='modal' i]"
+      );
+      const n = await dialogs.count().catch(() => 0);
+      for (let i = n - 1; i >= 0; i--) {
+        const dialog = dialogs.nth(i);
+        if (!(await dialog.isVisible().catch(() => false))) continue;
+        const radios = await dialog.locator("input[type='radio']").count().catch(() => 0);
+        if (radios >= 1) return dialog;
+      }
+      const panels = root.locator("div, section, form");
+      const panelCount = Math.min(await panels.count().catch(() => 0), 40);
+      for (let i = panelCount - 1; i >= 0; i--) {
+        const panel = panels.nth(i);
+        if (!(await panel.isVisible().catch(() => false))) continue;
+        const radios = await panel.locator("input[type='radio']").count().catch(() => 0);
+        if (radios < 1) continue;
+        const box = await panel.boundingBox().catch(() => null);
+        if (!box || box.height < 40 || box.height > 720 || box.width > 900) continue;
+        const update = panel.getByRole("button", { name: /^\s*update\s*$/i });
+        if ((await update.count().catch(() => 0)) > 0) return panel;
       }
     }
-    return { ok: false, error: "Housekeeping status dropdown not found for room" };
+    await new Promise((r) => setTimeout(r, 300));
   }
   return null;
 }
 
-/** Set one room's Housekeeping Status dropdown to Clean. The grid lives in an iframe. */
+async function clickCleanRadio(window: import("playwright").Locator) {
+  const byRole = window.getByRole("radio", { name: /^\s*clean\s*$/i }).first();
+  if ((await byRole.count().catch(() => 0)) > 0) {
+    await byRole.check({ force: true }).catch(async () => {
+      await byRole.click({ force: true });
+    });
+    return true;
+  }
+  const label = window.locator("label").filter({ hasText: /^\s*clean\s*$/i }).first();
+  if ((await label.count().catch(() => 0)) > 0 && (await label.isVisible().catch(() => false))) {
+    await label.click({ timeout: 4_000 });
+    return true;
+  }
+  const radio = window.locator("input[type='radio']");
+  const n = await radio.count().catch(() => 0);
+  for (let i = 0; i < n; i++) {
+    const input = radio.nth(i);
+    const name = (
+      (await input.getAttribute("aria-label").catch(() => null)) ||
+      (await input.getAttribute("value").catch(() => null)) ||
+      ""
+    ).trim();
+    const labelled = await input
+      .evaluate((el) => {
+        const id = el.getAttribute("id");
+        const fromFor = id ? document.querySelector(`label[for="${id.replace(/"/g, "")}"]`) : null;
+        const wrap = el.closest("label");
+        return ((fromFor || wrap)?.textContent || "").replace(/\s+/g, " ").trim();
+      })
+      .catch(() => "");
+    if (/^clean$/i.test(name) || /^clean$/i.test(labelled)) {
+      await input.check({ force: true }).catch(async () => {
+        await input.click({ force: true });
+      });
+      return true;
+    }
+  }
+  return false;
+}
+
+async function clickHousekeepingUpdate(window: import("playwright").Locator) {
+  const button = window.getByRole("button", { name: /^\s*update\s*$/i }).first();
+  if ((await button.count().catch(() => 0)) > 0 && (await button.isVisible().catch(() => false))) {
+    await button.click({ timeout: 5_000 });
+    return true;
+  }
+  const input = window.locator("input[type='button'], input[type='submit'], a, button").filter({
+    hasText: /^\s*update\s*$/i,
+  }).first();
+  if ((await input.count().catch(() => 0)) > 0 && (await input.isVisible().catch(() => false))) {
+    await input.click({ timeout: 5_000 });
+    return true;
+  }
+  const byValue = window.locator("input[value='Update' i], input[value='UPDATE']").first();
+  if ((await byValue.count().catch(() => 0)) > 0) {
+    await byValue.click({ timeout: 5_000 });
+    return true;
+  }
+  return false;
+}
+
+async function synxisRoomHousekeeping(page: import("playwright").Page, roomNumber: string) {
+  const want = roomNumber.trim().replace(/^0+(?=\d)/, "");
+  const rows = await scrapeBoardRows(page);
+  return rows.find((row) => row.roomNumber.trim().replace(/^0+(?=\d)/, "") === want)?.housekeeping || "";
+}
+
+/**
+ * Room Status write-back:
+ * check the room's box, open Housekeeping Status, choose the Clean radio, click Update.
+ */
 async function markSynxisRoomClean(
   page: import("playwright").Page,
   roomNumber: string
 ): Promise<{ ok: boolean; error?: string }> {
-  let sawDropdownMiss = "";
+  if ((await synxisRoomHousekeeping(page, roomNumber)) === "Clean") return { ok: true };
+
+  let tagged = false;
   for (const root of synxisDomRoots(page)) {
-    const result = await root.evaluate(MARK_SYNXIS_ROOM_CLEAN_FN, roomNumber).catch((err: unknown) => ({
-      ok: false as const,
-      error: err instanceof Error ? err.message : "Could not update the housekeeping dropdown",
-    }));
-    if (result.ok) return { ok: true };
-    if (!result.ok) {
-      const viaLocator = await markSynxisRoomCleanByLocator(root, roomNumber).catch(() => null);
-      if (viaLocator?.ok) return { ok: true };
-      if (viaLocator?.error && viaLocator.error !== "no-select" && !/not found/i.test(viaLocator.error)) {
-        sawDropdownMiss = viaLocator.error;
-      }
+    const found = await root.evaluate(TAG_SYNXIS_ROOM_CHECKBOX_FN, roomNumber).catch(() => ({ found: false as const }));
+    if (!found.found) continue;
+    const box = root.locator("[data-hk-check='1']").first();
+    if ((await box.count().catch(() => 0)) === 0) continue;
+    const type = ((await box.getAttribute("type").catch(() => null)) || "").toLowerCase();
+    if (type === "checkbox") {
+      await box.check({ force: true }).catch(async () => {
+        await box.click({ force: true });
+      });
+    } else {
+      await box.click({ force: true });
     }
-    if (result.error && result.error !== "no-select" && !/not found/i.test(result.error)) {
-      sawDropdownMiss = result.error;
+    tagged = true;
+    synxisLog("write:checkbox", { roomNumber });
+    break;
+  }
+
+  if (!tagged) {
+    const visible = (await scrapeBoardRows(page)).map((row) => row.roomNumber);
+    synxisLog("write:not-found", { roomNumber, visible: visible.slice(0, 15), visibleCount: visible.length });
+    const folded = (value: string) => value.trim().replace(/^0+(?=\d)/, "");
+    if (visible.some((n) => folded(n) === folded(roomNumber))) {
+      return { ok: false, error: "Room checkbox was not found" };
     }
+    return { ok: false, error: "Room not found on SynXis board" };
   }
-  if (sawDropdownMiss) return { ok: false, error: sawDropdownMiss };
-  const visible = (await scrapeBoardRows(page)).map((row) => row.roomNumber);
-  synxisLog("write:not-found", { roomNumber, visible: visible.slice(0, 15), visibleCount: visible.length });
-  const folded = (value: string) => value.trim().replace(/^0+(?=\d)/, "");
-  if (visible.some((n) => folded(n) === folded(roomNumber))) {
-    return { ok: false, error: "Housekeeping status dropdown not found for room" };
+
+  const menu = await clickHousekeepingStatusMenu(page);
+  synxisLog("write:menu", { roomNumber, opened: menu });
+  if (!menu) return { ok: false, error: "Housekeeping Status menu did not become available" };
+
+  const window = await housekeepingChoiceWindow(page);
+  if (!window) return { ok: false, error: "Housekeeping Status window did not open" };
+
+  const clean = await clickCleanRadio(window);
+  synxisLog("write:radio", { roomNumber, clean });
+  if (!clean) return { ok: false, error: "Clean radio button was not in the housekeeping window" };
+
+  const updated = await clickHousekeepingUpdate(window);
+  synxisLog("write:update", { roomNumber, updated });
+  if (!updated) return { ok: false, error: "Update button was not in the housekeeping window" };
+
+  await new Promise((r) => setTimeout(r, 1200));
+  for (let attempt = 0; attempt < 4; attempt++) {
+    if ((await synxisRoomHousekeeping(page, roomNumber)) === "Clean") return { ok: true };
+    await new Promise((r) => setTimeout(r, 700));
   }
-  return { ok: false, error: "Room not found on SynXis board" };
+  return { ok: false, error: "Update was clicked, but the room is still not Clean" };
 }
 
 /** Mark Clean write-back: set rooms to Clean on the SynXis board. */
@@ -3225,18 +3283,6 @@ export async function writeSynxisRoomsClean(input: {
           ok: false,
           error: err instanceof Error ? err.message : "Write failed",
         });
-      }
-    }
-
-    if (results.some((r) => r.ok)) {
-      for (const root of synxisDomRoots(boardPage)) {
-        const save = root.locator(selectors.saveButton).first();
-        if ((await save.count()) > 0 && (await save.isVisible().catch(() => false))) {
-          await save.click({ timeout: 8_000 }).catch(() => undefined);
-          synxisLog("write:saved");
-          await new Promise((r) => setTimeout(r, 2000));
-          break;
-        }
       }
     }
 
