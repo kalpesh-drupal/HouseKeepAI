@@ -2947,11 +2947,11 @@ export type SynxisBoardWriteResult = {
 };
 
 /**
- * The checkbox is the small box directly in front of the room number.
- * Checking it highlights that row, and HOUSEKEEPING STATUS turns on immediately.
- * Frozen columns can put the box in a sibling table on the same horizontal line.
+ * Click the room row beside the room number (not the number link, not the checkbox).
+ * That click highlights the row, checks the box, and turns on HOUSEKEEPING STATUS.
+ * The room number and the rest of the row can sit in sibling tables on the same line.
  */
-const TAG_SYNXIS_ROOM_CHECKBOX_FN = (room: string) => {
+const TAG_SYNXIS_ROOM_ROW_CLICK_FN = (room: string) => {
   const normalize = (s: string) => (s || "").replace(/\u00a0/g, " ").replace(/\s+/g, " ").trim();
   const fold = (s: string) => normalize(s).replace(/^0+(?=\d)/, "");
   const want = fold(room);
@@ -2984,15 +2984,8 @@ const TAG_SYNXIS_ROOM_CHECKBOX_FN = (room: string) => {
     }
     return false;
   };
-  const visibleRect = (el: HTMLElement) => {
-    const own = el.getBoundingClientRect();
-    if (own.width >= 8 && own.height >= 8) return own;
-    const root = el.getRootNode();
-    if (root instanceof ShadowRoot) return (root.host as HTMLElement).getBoundingClientRect();
-    return own;
-  };
 
-  for (const el of allElements()) el.removeAttribute("data-hk-check");
+  for (const el of allElements()) el.removeAttribute("data-hk-row");
 
   const isRoom = (raw: string) => {
     const t = fold(raw);
@@ -3016,39 +3009,127 @@ const TAG_SYNXIS_ROOM_CHECKBOX_FN = (room: string) => {
 
   const roomRect = roomEl.getBoundingClientRect();
   const roomMidY = roomRect.top + roomRect.height / 2;
-  let best: HTMLElement | null = null;
-  let bestScore = Number.POSITIVE_INFINITY;
+  const candidates: Array<{ el: HTMLElement; gap: number; area: number; children: number }> = [];
+  for (const el of allElements()) {
+    if (el === roomEl || el.contains(roomEl) || roomEl.contains(el)) continue;
+    if (inHeader(el)) continue;
+    if (el.tagName === "A" || el.tagName === "BUTTON" || el.closest("a, button")) continue;
+    const role = (el.getAttribute("role") || "").toLowerCase();
+    if (role === "button" || role === "checkbox" || role === "link") continue;
+    const type = (el.getAttribute("type") || "").toLowerCase();
+    const cls = String(el.className || "");
+    if (type === "checkbox" || /checkbox/i.test(cls)) continue;
+    const rect = el.getBoundingClientRect();
+    if (rect.width < 20 || rect.height < 12 || rect.width > 320 || rect.height > 56) continue;
+    const midY = rect.top + rect.height / 2;
+    if (Math.abs(midY - roomMidY) > 16) continue;
+    if (rect.left < roomRect.right - 2) continue;
+    const text = normalize(el.innerText || el.textContent || "");
+    if (text.length > 40 || fold(text) === want) continue;
+    candidates.push({
+      el,
+      gap: rect.left - roomRect.right,
+      area: rect.width * rect.height,
+      children: el.children.length,
+    });
+  }
+  candidates.sort((a, b) => a.children - b.children || a.gap - b.gap || a.area - b.area);
+  const picked = candidates.slice(0, 4);
+  picked.forEach((item, index) => item.el.setAttribute("data-hk-row", String(index + 1)));
+  if (!picked.length) return { found: false as const };
+  return {
+    found: true as const,
+    count: picked.length,
+    className: String(picked[0].el.className || "").slice(0, 80),
+    text: normalize(picked[0].el.innerText || "").slice(0, 24),
+  };
+};
+
+/** Row highlight or checkbox state after clicking beside the room number. */
+const READ_SYNXIS_ROOM_SELECTED_FN = (room: string) => {
+  const normalize = (s: string) => (s || "").replace(/\u00a0/g, " ").replace(/\s+/g, " ").trim();
+  const fold = (s: string) => normalize(s).replace(/^0+(?=\d)/, "");
+  const want = fold(room);
+  const roomRe = /^[A-Za-z]{0,3}\d{1,5}[A-Za-z]?$/;
+  const parentAcross = (el: HTMLElement): HTMLElement | null => {
+    if (el.parentElement) return el.parentElement;
+    const root = el.getRootNode();
+    if (root instanceof ShadowRoot) return root.host as HTMLElement;
+    return null;
+  };
+  const allElements = () => {
+    const out: HTMLElement[] = [];
+    const visit = (root: ParentNode) => {
+      for (const el of Array.from(root.querySelectorAll("*")) as HTMLElement[]) {
+        out.push(el);
+        if (el.shadowRoot) visit(el.shadowRoot);
+      }
+    };
+    visit(document);
+    return out;
+  };
+  const isRoom = (raw: string) => {
+    const t = fold(raw);
+    return Boolean(t) && t.length <= 12 && roomRe.test(t) && t === want;
+  };
+  let roomEl: HTMLElement | null = null;
+  let roomArea = Number.POSITIVE_INFINITY;
+  for (const el of allElements()) {
+    const text = normalize(el.innerText || el.textContent || "");
+    if (text.length > 8 || !isRoom(text)) continue;
+    const rect = el.getBoundingClientRect();
+    if (rect.width < 8 || rect.height < 8) continue;
+    const area = rect.width * rect.height;
+    if (area < roomArea) {
+      roomEl = el;
+      roomArea = area;
+    }
+  }
+  if (!roomEl) return { checked: false, highlighted: false };
+
+  const roomRect = roomEl.getBoundingClientRect();
+  const roomMidY = roomRect.top + roomRect.height / 2;
+  const rowSelected = /(?:^|[\s_])(?:selected|highlight|k-state-selected|is-selected|row-selected)(?:$|[\s_])/i;
+  let checked = false;
+  let highlighted = false;
+
+  let node: HTMLElement | null = roomEl;
+  for (let depth = 0; node && depth < 10; depth++) {
+    const cls = String(node.className || "");
+    if (node.getAttribute("aria-selected") === "true" || rowSelected.test(cls)) {
+      highlighted = true;
+      break;
+    }
+    node = parentAcross(node);
+  }
+
   for (const box of allElements()) {
     const type = (box.getAttribute("type") || "").toLowerCase();
     const role = (box.getAttribute("role") || "").toLowerCase();
     const cls = String(box.className || "");
     const isBox = type === "checkbox" || role === "checkbox" || /checkbox/i.test(cls);
-    if (!isBox || inHeader(box)) continue;
-    const label = `${box.getAttribute("aria-label") || ""} ${box.getAttribute("title") || ""} ${box.id || ""}`;
-    if (/select\s*all/i.test(label)) continue;
-    const rect = visibleRect(box);
-    if (rect.width < 8 || rect.height < 8 || rect.width > 40 || rect.height > 40) continue;
+    if (!isBox) continue;
+    const rect = box.getBoundingClientRect();
+    if (rect.width < 8 || rect.height < 8) continue;
     const midY = rect.top + rect.height / 2;
-    const dy = Math.abs(midY - roomMidY);
-    if (dy > 18) continue;
-    const gap = roomRect.left - rect.right;
-    if (gap < -8 || gap > 180) continue;
-    const inputBonus = type === "checkbox" ? -30 : 0;
-    const score = dy * 20 + Math.abs(gap) + inputBonus;
-    if (score < bestScore) {
-      best = box;
-      bestScore = score;
+    if (Math.abs(midY - roomMidY) > 18) continue;
+    if (roomRect.left - rect.right > 180 || rect.left > roomRect.left + 8) continue;
+    const input =
+      box instanceof HTMLInputElement
+        ? box
+        : box.shadowRoot?.querySelector("input[type='checkbox']");
+    if (
+      (input instanceof HTMLInputElement && input.checked) ||
+      box.getAttribute("aria-checked") === "true" ||
+      box.hasAttribute("checked") ||
+      /(?:^|[\s_-])(?:is-checked|checked)(?:$|[\s_-])/i.test(cls)
+    ) {
+      checked = true;
     }
+    if (rowSelected.test(cls) || box.getAttribute("aria-selected") === "true") highlighted = true;
   }
-  if (!best) return { found: false as const };
-  const root = best.getRootNode();
-  const clickHost = root instanceof ShadowRoot ? (root.host as HTMLElement) : best;
-  clickHost.setAttribute("data-hk-check", "1");
-  return {
-    found: true as const,
-    tag: clickHost.tagName,
-    className: String(clickHost.className || "").slice(0, 80),
-  };
+
+  return { checked, highlighted };
 };
 
 async function controlIsDisabled(el: import("playwright").Locator) {
@@ -3329,7 +3410,7 @@ async function synxisRoomHousekeeping(page: import("playwright").Page, roomNumbe
 
 /**
  * Room Status write-back, in the order shown on the board:
- * 1. Check the room's checkbox.
+ * 1. Click the room row beside the room number. That highlights the row and checks the box.
  * 2. Click the HOUSEKEEPING STATUS toolbar button.
  * 3. In the Housekeeping Status window, select the Clean radio.
  * 4. Click UPDATE.
@@ -3342,78 +3423,35 @@ async function markSynxisRoomClean(
 
   let tagged = false;
   for (const root of synxisDomRoots(page)) {
-    const found = await root.evaluate(TAG_SYNXIS_ROOM_CHECKBOX_FN, roomNumber).catch(() => ({ found: false as const }));
+    const found = await root
+      .evaluate(TAG_SYNXIS_ROOM_ROW_CLICK_FN, roomNumber)
+      .catch(() => ({ found: false as const }));
     if (!found.found) continue;
-    const box = root.locator("[data-hk-check='1']").first();
-    if ((await box.count().catch(() => 0)) === 0) continue;
-    await box.scrollIntoViewIfNeeded().catch(() => undefined);
-    const readSelected = () =>
-      box
-        .evaluate((el) => {
-          const parentAcross = (node: Element): Element | null => {
-            if (node.parentElement) return node.parentElement;
-            const rootNode = node.getRootNode();
-            if (rootNode instanceof ShadowRoot) return rootNode.host;
-            return null;
-          };
-          const inputOf = (node: Element): HTMLInputElement | null => {
-            if (node instanceof HTMLInputElement && node.type === "checkbox") return node;
-            const nested = node.shadowRoot?.querySelector("input[type='checkbox']");
-            return nested instanceof HTMLInputElement ? nested : null;
-          };
-          const input = inputOf(el);
-          const checked = input?.checked === true || el.getAttribute("aria-checked") === "true";
-          let highlighted = false;
-          let node: Element | null = el;
-          for (let depth = 0; node && depth < 8; depth++) {
-            const cls = String(node.className || "");
-            if (
-              node.getAttribute("aria-selected") === "true" ||
-              node.getAttribute("aria-checked") === "true" ||
-              /selected|highlight|k-state-selected|is-selected|row-selected|is-checked/i.test(cls)
-            ) {
-              highlighted = true;
-              break;
-            }
-            node = parentAcross(node);
-          }
-          return { checked, highlighted };
-        })
+    const spot = root.locator("[data-hk-row='1']").first();
+    if ((await spot.count().catch(() => 0)) === 0) continue;
+    await spot.scrollIntoViewIfNeeded().catch(() => undefined);
+    const clicked = await spot
+      .click({ timeout: 2_500 })
+      .then(() => true)
+      .catch(async () => spot.click({ timeout: 2_500, force: true }).then(() => true).catch(() => false));
+    if (!clicked) continue;
+    let selected = { checked: false, highlighted: false };
+    for (let poll = 0; poll < 5; poll++) {
+      selected = await root
+        .evaluate(READ_SYNXIS_ROOM_SELECTED_FN, roomNumber)
         .catch(() => ({ checked: false, highlighted: false }));
-    await box.click({ force: true }).catch(() => undefined);
-    let selected = await readSelected();
-    if (!selected.checked && !selected.highlighted) {
-      await box
-        .evaluate((el) => {
-          const input =
-            el instanceof HTMLInputElement
-              ? el
-              : el.shadowRoot?.querySelector("input[type='checkbox']");
-          if (input instanceof HTMLInputElement) {
-            input.click();
-            input.dispatchEvent(new Event("input", { bubbles: true, composed: true }));
-            input.dispatchEvent(new Event("change", { bubbles: true, composed: true }));
-          } else {
-            (el as HTMLElement).click();
-          }
-        })
-        .catch(() => undefined);
-      selected = await readSelected();
+      if (selected.checked || selected.highlighted) break;
+      await new Promise((r) => setTimeout(r, 200));
     }
     tagged = true;
     synxisLog("write:step", {
       step: 1,
-      action: "checkbox-in-front-of-room",
+      action: "row-beside-room-number",
       roomNumber,
       control: "className" in found ? found.className : "",
+      text: "text" in found ? found.text : "",
       ...selected,
     });
-    if (!selected.checked && !selected.highlighted) {
-      return {
-        ok: false,
-        error: "Room checkbox did not stay checked, so Housekeeping Status stayed off",
-      };
-    }
     if (process.env.PLAYWRIGHT_HEADED === "1") await new Promise((r) => setTimeout(r, 1200));
     break;
   }
@@ -3423,7 +3461,7 @@ async function markSynxisRoomClean(
     synxisLog("write:not-found", { roomNumber, visible: visible.slice(0, 15), visibleCount: visible.length });
     const folded = (value: string) => value.trim().replace(/^0+(?=\d)/, "");
     if (visible.some((n) => folded(n) === folded(roomNumber))) {
-      return { ok: false, error: "Room checkbox was not found" };
+      return { ok: false, error: "Room row was not found beside the room number" };
     }
     return { ok: false, error: "Room not found on SynXis board" };
   }
