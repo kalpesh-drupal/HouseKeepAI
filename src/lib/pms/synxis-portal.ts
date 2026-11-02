@@ -3009,7 +3009,7 @@ const TAG_SYNXIS_ROOM_ROW_CLICK_FN = (room: string) => {
 
   const roomRect = roomEl.getBoundingClientRect();
   const roomMidY = roomRect.top + roomRect.height / 2;
-  const candidates: Array<{ el: HTMLElement; gap: number; area: number; children: number }> = [];
+  const candidates: Array<{ el: HTMLElement; gap: number; area: number; children: number; grid: number }> = [];
   for (const el of allElements()) {
     if (el === roomEl || el.contains(roomEl) || roomEl.contains(el)) continue;
     if (inHeader(el)) continue;
@@ -3031,9 +3031,10 @@ const TAG_SYNXIS_ROOM_ROW_CLICK_FN = (room: string) => {
       gap: rect.left - roomRect.right,
       area: rect.width * rect.height,
       children: el.children.length,
+      grid: /room-status-grid|rooms-status/i.test(cls) ? 0 : 1,
     });
   }
-  candidates.sort((a, b) => a.children - b.children || a.gap - b.gap || a.area - b.area);
+  candidates.sort((a, b) => a.grid - b.grid || a.children - b.children || a.gap - b.gap || a.area - b.area);
   const picked = candidates.slice(0, 4);
   picked.forEach((item, index) => item.el.setAttribute("data-hk-row", String(index + 1)));
   if (!picked.length) return { found: false as const };
@@ -3121,7 +3122,7 @@ const READ_SYNXIS_ROOM_SELECTED_FN = (room: string) => {
     if (
       (input instanceof HTMLInputElement && input.checked) ||
       box.getAttribute("aria-checked") === "true" ||
-      box.hasAttribute("checked") ||
+      (box.getAttribute("checked") !== null && !/^(?:false|0)$/i.test(box.getAttribute("checked") || "")) ||
       /(?:^|[\s_-])(?:is-checked|checked)(?:$|[\s_-])/i.test(cls)
     ) {
       checked = true;
@@ -3189,20 +3190,14 @@ const TAG_SYNXIS_HK_TOOLBAR_FN = () => {
     return false;
   };
 
-  const isFilterHeader = (el: HTMLElement) => {
-    let node: HTMLElement | null = el;
-    for (let depth = 0; node && depth < 6; depth++) {
-      if (/spark-filter-module__header|spark-filter__header/i.test(String(node.className || ""))) return true;
-      node = parentAcross(node);
-    }
-    return false;
-  };
+  const isFilterHeader = (el: HTMLElement) =>
+    /spark-filter-module__header|spark-filter__header/i.test(String(el.className || ""));
 
   const inToolbar = (el: HTMLElement) => {
     let node: HTMLElement | null = parentAcross(el);
     for (let depth = 0; node && depth < 10; depth++) {
       const text = normalize(node.innerText || "");
-      if (text.length > 700) return false;
+      if (text.length > 1600) return false;
       if (
         /housekeeping\s*status/i.test(text) &&
         /occupancy\s*status/i.test(text) &&
@@ -3234,7 +3229,7 @@ const TAG_SYNXIS_HK_TOOLBAR_FN = () => {
   const candidates: Array<{ el: HTMLElement; area: number; clickable: boolean }> = [];
   for (const el of nodes) {
     const text = normalize(el.innerText || el.textContent || "");
-    if (text.length > 40 || !/^housekeeping\s*status\b/i.test(text)) continue;
+    if (text.length > 48 || !/housekeeping\s*status/i.test(text)) continue;
     if (el.closest("thead, th, [role='columnheader']")) continue;
     if (isFilterHeader(el)) continue;
     const toolbar = inToolbar(el);
@@ -3261,11 +3256,11 @@ const TAG_SYNXIS_HK_TOOLBAR_FN = () => {
 /** After the room checkbox is on, click the HOUSEKEEPING STATUS toolbar button. */
 async function clickHousekeepingStatusMenu(page: import("playwright").Page) {
   const deadline = Date.now() + 8_000;
-  let lastHits: unknown = [];
+  const seenHits: unknown[] = [];
   while (Date.now() < deadline) {
     for (const root of synxisDomRoots(page)) {
       const tagged = await root.evaluate(TAG_SYNXIS_HK_TOOLBAR_FN).catch(() => ({ found: false as const, hits: [] }));
-      lastHits = tagged.hits;
+      if (tagged.hits?.length) seenHits.splice(0, seenHits.length, ...tagged.hits);
       if (!tagged.found) continue;
       const button = root.locator("[data-hk-menu='1']").first();
       if ((await button.count().catch(() => 0)) === 0) continue;
@@ -3293,7 +3288,7 @@ async function clickHousekeepingStatusMenu(page: import("playwright").Page) {
     }
     await new Promise((r) => setTimeout(r, 400));
   }
-  synxisLog("write:menu-missing", { hits: lastHits });
+  synxisLog("write:menu-missing", { hits: seenHits });
   return false;
 }
 
