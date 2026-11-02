@@ -3190,8 +3190,8 @@ const TAG_SYNXIS_HK_TOOLBAR_FN = () => {
     return false;
   };
 
-  const isFilterHeader = (el: HTMLElement) =>
-    /spark-filter-module__header|spark-filter__header/i.test(String(el.className || ""));
+  const isFilterChrome = (el: HTMLElement) =>
+    /spark-filter|spark-modal/i.test(String(el.className || ""));
 
   const inToolbar = (el: HTMLElement) => {
     let node: HTMLElement | null = parentAcross(el);
@@ -3214,24 +3214,13 @@ const TAG_SYNXIS_HK_TOOLBAR_FN = () => {
     el.tagName === "BUTTON" || el.tagName === "A" || el.getAttribute("role") === "button";
 
   const hits: Array<{ tag: string; className: string; toolbar: boolean; disabled: boolean }> = [];
-  const nodes = allElements().filter((el) => {
-    const role = (el.getAttribute("role") || "").toLowerCase();
-    return (
-      el.tagName === "BUTTON" ||
-      el.tagName === "A" ||
-      el.tagName === "DIV" ||
-      el.tagName === "SPAN" ||
-      el.tagName === "LI" ||
-      role === "button" ||
-      /button/i.test(String(el.className || ""))
-    );
-  });
   const candidates: Array<{ el: HTMLElement; area: number; clickable: boolean }> = [];
-  for (const el of nodes) {
-    const text = normalize(el.innerText || el.textContent || "");
-    if (text.length > 48 || !/housekeeping\s*status/i.test(text)) continue;
+  for (const el of allElements()) {
+    const text = normalize(el.innerText || el.textContent || el.getAttribute("aria-label") || "");
+    if (!/^housekeeping\s*status$/i.test(text)) continue;
+    if (/occupancy\s*status|manage\s*assignments|out\s*of\s*order/i.test(text)) continue;
     if (el.closest("thead, th, [role='columnheader']")) continue;
-    if (isFilterHeader(el)) continue;
+    if (isFilterChrome(el)) continue;
     const toolbar = inToolbar(el);
     const disabled = disabledOf(el);
     if (hits.length < 8) {
@@ -3244,7 +3233,7 @@ const TAG_SYNXIS_HK_TOOLBAR_FN = () => {
     }
     if (!toolbar || disabled) continue;
     const rect = el.getBoundingClientRect();
-    if (rect.width < 8 || rect.height < 8) continue;
+    if (rect.width < 8 || rect.height < 8 || rect.width > 280) continue;
     candidates.push({ el, area: rect.width * rect.height, clickable: clickable(el) });
   }
   if (!candidates.length) return { found: false as const, hits };
@@ -3297,8 +3286,15 @@ async function clickHousekeepingStatusMenu(page: import("playwright").Page) {
  */
 const TAG_SYNXIS_HK_DIALOG_FN = () => {
   const normalize = (s: string) => (s || "").replace(/\u00a0/g, " ").replace(/\s+/g, " ").trim();
-  document.querySelectorAll("[data-hk-dialog]").forEach((el) => el.removeAttribute("data-hk-dialog"));
-  const nodes = Array.from(document.querySelectorAll("div, section, form, [role='dialog']")) as HTMLElement[];
+  const nodes: HTMLElement[] = [];
+  const visit = (root: ParentNode) => {
+    for (const el of Array.from(root.querySelectorAll("*")) as HTMLElement[]) {
+      el.removeAttribute("data-hk-dialog");
+      nodes.push(el);
+      if (el.shadowRoot) visit(el.shadowRoot);
+    }
+  };
+  visit(document);
   let best: HTMLElement | null = null;
   let bestArea = Number.POSITIVE_INFINITY;
   for (const el of nodes) {
