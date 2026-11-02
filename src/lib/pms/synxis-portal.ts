@@ -3221,7 +3221,8 @@ const TAG_SYNXIS_HK_TOOLBAR_FN = () => {
     if (/occupancy\s*status|manage\s*assignments|out\s*of\s*order/i.test(text)) continue;
     if (el.closest("thead, th, [role='columnheader']")) continue;
     if (isFilterChrome(el)) continue;
-    const toolbar = inToolbar(el);
+    const toolbarItem = /spark-toolbar__item/i.test(String(el.className || ""));
+    const toolbar = toolbarItem || inToolbar(el);
     const disabled = disabledOf(el);
     if (hits.length < 8) {
       hits.push({
@@ -3234,7 +3235,7 @@ const TAG_SYNXIS_HK_TOOLBAR_FN = () => {
     if (!toolbar || disabled) continue;
     const rect = el.getBoundingClientRect();
     if (rect.width < 8 || rect.height < 8 || rect.width > 280) continue;
-    candidates.push({ el, area: rect.width * rect.height, clickable: clickable(el) });
+    candidates.push({ el, area: rect.width * rect.height, clickable: clickable(el) || toolbarItem });
   }
   if (!candidates.length) return { found: false as const, hits };
   candidates.sort((a, b) => Number(b.clickable) - Number(a.clickable) || a.area - b.area);
