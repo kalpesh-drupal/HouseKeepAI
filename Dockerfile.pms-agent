@@ -24,5 +24,13 @@ RUN npm run pms:agent:build
 
 ENV NODE_ENV=production
 
+# npm as PID 1 never reaps Firefox's dead child processes (forkserver, Socket,
+# RDD, Utility). Railway allows 1000 processes per container. Those leftovers
+# fill the cap and the next Firefox cannot start, even when RAM is still free.
+# tini is PID 1 and reaps them.
+ADD https://github.com/krallin/tini/releases/download/v0.19.0/tini-amd64 /usr/bin/tini
+RUN chmod +x /usr/bin/tini
+ENTRYPOINT ["/usr/bin/tini", "--"]
+
 # Railway injects PORT; the worker serves a tiny / health response so checks pass.
 CMD ["npm", "run", "pms:agent:start"]

@@ -76,10 +76,35 @@ function startHealthServer() {
   });
 }
 
-/** One Chrome at a time. A second browser on a small host dies at launch. */
+/** One browser at a time. A second browser on a small host dies at launch. */
 let chromeBusy: "write" | "collect" | null = null;
 
+/**
+ * Railway caps each container at 1000 processes. Firefox exits leave zombies
+ * under npm, and a new browser cannot start once that cap is full.
+ * Exit before the cap so Railway restarts onto a clean process list.
+ */
+function exitIfProcessCapNear() {
+  let currentRaw = "";
+  let maxRaw = "";
+  try {
+    currentRaw = readFileSync("/sys/fs/cgroup/pids.current", "utf8").trim();
+    maxRaw = readFileSync("/sys/fs/cgroup/pids.max", "utf8").trim();
+  } catch {
+    return;
+  }
+  const current = Number(currentRaw);
+  const max = Number(maxRaw);
+  if (!Number.isFinite(current) || !Number.isFinite(max) || max <= 0 || max > 100_000) return;
+  if (current < max * 0.85) return;
+  log(
+    `process cap ${current}/${max} — exiting so Railway restarts and drops leftover Firefox processes`
+  );
+  process.exit(1);
+}
+
 async function runWrites() {
+  exitIfProcessCapNear();
   if (chromeBusy) {
     log(`write tick skipped (chrome busy: ${chromeBusy})`);
     return;
@@ -120,6 +145,7 @@ async function runWrites() {
 }
 
 async function runCollects() {
+  exitIfProcessCapNear();
   if (chromeBusy) {
     log(`collect tick skipped (chrome busy: ${chromeBusy})`);
     return;
@@ -208,6 +234,13 @@ async function main() {
   setInterval(() => {
     void safe(runCollects, "collect");
   }, COLLECT_MS);
+  setInterval(() => {
+    try {
+      exitIfProcessCapNear();
+    } catch (err) {
+      log(`process-cap check ERROR ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }, 60_000);
 
   const shutdown = () => {
     log("PMS agent stopping");
