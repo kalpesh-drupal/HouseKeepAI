@@ -2957,17 +2957,51 @@ const TAG_SYNXIS_ROOM_CHECKBOX_FN = (room: string) => {
   const want = fold(room);
   const roomRe = /^[A-Za-z]{0,3}\d{1,5}[A-Za-z]?$/;
 
-  document.querySelectorAll("[data-hk-check]").forEach((el) => el.removeAttribute("data-hk-check"));
+  const parentAcross = (el: HTMLElement): HTMLElement | null => {
+    if (el.parentElement) return el.parentElement;
+    const root = el.getRootNode();
+    if (root instanceof ShadowRoot) return root.host as HTMLElement;
+    return null;
+  };
+  const allElements = () => {
+    const out: HTMLElement[] = [];
+    const visit = (root: ParentNode) => {
+      for (const el of Array.from(root.querySelectorAll("*")) as HTMLElement[]) {
+        out.push(el);
+        if (el.shadowRoot) visit(el.shadowRoot);
+      }
+    };
+    visit(document);
+    return out;
+  };
+  const inHeader = (el: HTMLElement) => {
+    let node: HTMLElement | null = el;
+    for (let depth = 0; node && depth < 8; depth++) {
+      if (node.tagName === "THEAD" || node.tagName === "TH" || node.getAttribute("role") === "columnheader") {
+        return true;
+      }
+      node = parentAcross(node);
+    }
+    return false;
+  };
+  const visibleRect = (el: HTMLElement) => {
+    const own = el.getBoundingClientRect();
+    if (own.width >= 8 && own.height >= 8) return own;
+    const root = el.getRootNode();
+    if (root instanceof ShadowRoot) return (root.host as HTMLElement).getBoundingClientRect();
+    return own;
+  };
+
+  for (const el of allElements()) el.removeAttribute("data-hk-check");
 
   const isRoom = (raw: string) => {
     const t = fold(raw);
     return Boolean(t) && t.length <= 12 && roomRe.test(t) && t === want;
   };
 
-  const roomNodes = Array.from(document.querySelectorAll("a, td, span, [role='gridcell']")) as HTMLElement[];
   let roomEl: HTMLElement | null = null;
   let roomArea = Number.POSITIVE_INFINITY;
-  for (const el of roomNodes) {
+  for (const el of allElements()) {
     const text = normalize(el.innerText || el.textContent || "");
     if (text.length > 8 || !isRoom(text)) continue;
     const rect = el.getBoundingClientRect();
@@ -2982,30 +3016,39 @@ const TAG_SYNXIS_ROOM_CHECKBOX_FN = (room: string) => {
 
   const roomRect = roomEl.getBoundingClientRect();
   const roomMidY = roomRect.top + roomRect.height / 2;
-  const boxes = Array.from(
-    document.querySelectorAll("input[type='checkbox'], [role='checkbox'], [class*='checkbox' i]")
-  ) as HTMLElement[];
   let best: HTMLElement | null = null;
   let bestScore = Number.POSITIVE_INFINITY;
-  for (const box of boxes) {
+  for (const box of allElements()) {
+    const type = (box.getAttribute("type") || "").toLowerCase();
+    const role = (box.getAttribute("role") || "").toLowerCase();
+    const cls = String(box.className || "");
+    const isBox = type === "checkbox" || role === "checkbox" || /checkbox/i.test(cls);
+    if (!isBox || inHeader(box)) continue;
     const label = `${box.getAttribute("aria-label") || ""} ${box.getAttribute("title") || ""} ${box.id || ""}`;
     if (/select\s*all/i.test(label)) continue;
-    const rect = box.getBoundingClientRect();
-    if (rect.width < 8 || rect.height < 8 || rect.width > 36 || rect.height > 36) continue;
+    const rect = visibleRect(box);
+    if (rect.width < 8 || rect.height < 8 || rect.width > 40 || rect.height > 40) continue;
     const midY = rect.top + rect.height / 2;
     const dy = Math.abs(midY - roomMidY);
-    if (dy > 16) continue;
+    if (dy > 18) continue;
     const gap = roomRect.left - rect.right;
-    if (gap < -6 || gap > 180) continue;
-    const score = dy * 20 + gap;
+    if (gap < -8 || gap > 180) continue;
+    const inputBonus = type === "checkbox" ? -30 : 0;
+    const score = dy * 20 + Math.abs(gap) + inputBonus;
     if (score < bestScore) {
       best = box;
       bestScore = score;
     }
   }
   if (!best) return { found: false as const };
-  best.setAttribute("data-hk-check", "1");
-  return { found: true as const };
+  const root = best.getRootNode();
+  const clickHost = root instanceof ShadowRoot ? (root.host as HTMLElement) : best;
+  clickHost.setAttribute("data-hk-check", "1");
+  return {
+    found: true as const,
+    tag: clickHost.tagName,
+    className: String(clickHost.className || "").slice(0, 80),
+  };
 };
 
 async function controlIsDisabled(el: import("playwright").Locator) {
@@ -3031,20 +3074,52 @@ async function controlIsDisabled(el: import("playwright").Locator) {
  */
 const TAG_SYNXIS_HK_TOOLBAR_FN = () => {
   const normalize = (s: string) => (s || "").replace(/\u00a0/g, " ").replace(/\s+/g, " ").trim();
-  document.querySelectorAll("[data-hk-menu]").forEach((el) => el.removeAttribute("data-hk-menu"));
+  const parentAcross = (el: HTMLElement): HTMLElement | null => {
+    if (el.parentElement) return el.parentElement;
+    const root = el.getRootNode();
+    if (root instanceof ShadowRoot) return root.host as HTMLElement;
+    return null;
+  };
+  const allElements = () => {
+    const out: HTMLElement[] = [];
+    const visit = (root: ParentNode) => {
+      for (const el of Array.from(root.querySelectorAll("*")) as HTMLElement[]) {
+        out.push(el);
+        if (el.shadowRoot) visit(el.shadowRoot);
+      }
+    };
+    visit(document);
+    return out;
+  };
+  for (const el of allElements()) el.removeAttribute("data-hk-menu");
 
-  const disabledOf = (el: HTMLElement) =>
-    el.hasAttribute("disabled") ||
-    el.getAttribute("aria-disabled") === "true" ||
-    /\b(disabled|k-disabled|k-state-disabled|is-disabled)\b/i.test(String(el.className || ""));
+  const disabledOf = (el: HTMLElement) => {
+    let node: HTMLElement | null = el;
+    for (let depth = 0; node && depth < 4; depth++) {
+      if (
+        node.hasAttribute("disabled") ||
+        node.getAttribute("aria-disabled") === "true" ||
+        /\b(disabled|k-disabled|k-state-disabled|is-disabled)\b/i.test(String(node.className || ""))
+      ) {
+        return true;
+      }
+      node = parentAcross(node);
+    }
+    return false;
+  };
 
-  const isFilterHeader = (el: HTMLElement) =>
-    /spark-filter-module__header|spark-filter__header/i.test(String(el.className || "")) ||
-    Boolean(el.closest(".spark-filter-module__header, .spark-filter__header"));
+  const isFilterHeader = (el: HTMLElement) => {
+    let node: HTMLElement | null = el;
+    for (let depth = 0; node && depth < 6; depth++) {
+      if (/spark-filter-module__header|spark-filter__header/i.test(String(node.className || ""))) return true;
+      node = parentAcross(node);
+    }
+    return false;
+  };
 
   const inToolbar = (el: HTMLElement) => {
-    let node: HTMLElement | null = el.parentElement;
-    for (let depth = 0; node && depth < 8; depth++) {
+    let node: HTMLElement | null = parentAcross(el);
+    for (let depth = 0; node && depth < 10; depth++) {
       const text = normalize(node.innerText || "");
       if (text.length > 700) return false;
       if (
@@ -3054,7 +3129,7 @@ const TAG_SYNXIS_HK_TOOLBAR_FN = () => {
       ) {
         return true;
       }
-      node = node.parentElement;
+      node = parentAcross(node);
     }
     return false;
   };
@@ -3063,7 +3138,18 @@ const TAG_SYNXIS_HK_TOOLBAR_FN = () => {
     el.tagName === "BUTTON" || el.tagName === "A" || el.getAttribute("role") === "button";
 
   const hits: Array<{ tag: string; className: string; toolbar: boolean; disabled: boolean }> = [];
-  const nodes = Array.from(document.querySelectorAll("button, a, [role='button'], div, span, li")) as HTMLElement[];
+  const nodes = allElements().filter((el) => {
+    const role = (el.getAttribute("role") || "").toLowerCase();
+    return (
+      el.tagName === "BUTTON" ||
+      el.tagName === "A" ||
+      el.tagName === "DIV" ||
+      el.tagName === "SPAN" ||
+      el.tagName === "LI" ||
+      role === "button" ||
+      /button/i.test(String(el.className || ""))
+    );
+  });
   const candidates: Array<{ el: HTMLElement; area: number; clickable: boolean }> = [];
   for (const el of nodes) {
     const text = normalize(el.innerText || el.textContent || "");
@@ -3261,29 +3347,73 @@ async function markSynxisRoomClean(
     const box = root.locator("[data-hk-check='1']").first();
     if ((await box.count().catch(() => 0)) === 0) continue;
     await box.scrollIntoViewIfNeeded().catch(() => undefined);
-    await box.click({ timeout: 3_000 }).catch(async () => {
-      await box.click({ force: true });
-    });
-    const selected = await box
-      .evaluate((el) => {
-        const input = el as HTMLInputElement;
-        const checked = input.checked === true || el.getAttribute("aria-checked") === "true";
-        const row = el.closest("tr, [role='row']") as HTMLElement | null;
-        const cls = `${row?.className || ""} ${el.className || ""} ${el.parentElement?.className || ""}`;
-        const highlighted =
-          row?.getAttribute("aria-selected") === "true" ||
-          el.getAttribute("aria-checked") === "true" ||
-          /selected|highlight|k-state-selected|is-selected|row-selected/i.test(cls);
-        return { checked, highlighted };
-      })
-      .catch(() => ({ checked: false, highlighted: false }));
-    if (!selected.checked) {
-      const cell = box.locator("xpath=ancestor::td[1] | ancestor::*[@role='gridcell'][1]");
-      if ((await cell.count().catch(() => 0)) > 0) await cell.click({ timeout: 2_000 }).catch(() => undefined);
-      else await box.click({ force: true }).catch(() => undefined);
+    const readSelected = () =>
+      box
+        .evaluate((el) => {
+          const parentAcross = (node: Element): Element | null => {
+            if (node.parentElement) return node.parentElement;
+            const rootNode = node.getRootNode();
+            if (rootNode instanceof ShadowRoot) return rootNode.host;
+            return null;
+          };
+          const inputOf = (node: Element): HTMLInputElement | null => {
+            if (node instanceof HTMLInputElement && node.type === "checkbox") return node;
+            const nested = node.shadowRoot?.querySelector("input[type='checkbox']");
+            return nested instanceof HTMLInputElement ? nested : null;
+          };
+          const input = inputOf(el);
+          const checked = input?.checked === true || el.getAttribute("aria-checked") === "true";
+          let highlighted = false;
+          let node: Element | null = el;
+          for (let depth = 0; node && depth < 8; depth++) {
+            const cls = String(node.className || "");
+            if (
+              node.getAttribute("aria-selected") === "true" ||
+              node.getAttribute("aria-checked") === "true" ||
+              /selected|highlight|k-state-selected|is-selected|row-selected|is-checked/i.test(cls)
+            ) {
+              highlighted = true;
+              break;
+            }
+            node = parentAcross(node);
+          }
+          return { checked, highlighted };
+        })
+        .catch(() => ({ checked: false, highlighted: false }));
+    await box.click({ force: true }).catch(() => undefined);
+    let selected = await readSelected();
+    if (!selected.checked && !selected.highlighted) {
+      await box
+        .evaluate((el) => {
+          const input =
+            el instanceof HTMLInputElement
+              ? el
+              : el.shadowRoot?.querySelector("input[type='checkbox']");
+          if (input instanceof HTMLInputElement) {
+            input.click();
+            input.dispatchEvent(new Event("input", { bubbles: true, composed: true }));
+            input.dispatchEvent(new Event("change", { bubbles: true, composed: true }));
+          } else {
+            (el as HTMLElement).click();
+          }
+        })
+        .catch(() => undefined);
+      selected = await readSelected();
     }
     tagged = true;
-    synxisLog("write:step", { step: 1, action: "checkbox-in-front-of-room", roomNumber, ...selected });
+    synxisLog("write:step", {
+      step: 1,
+      action: "checkbox-in-front-of-room",
+      roomNumber,
+      control: "className" in found ? found.className : "",
+      ...selected,
+    });
+    if (!selected.checked && !selected.highlighted) {
+      return {
+        ok: false,
+        error: "Room checkbox did not stay checked, so Housekeeping Status stayed off",
+      };
+    }
     if (process.env.PLAYWRIGHT_HEADED === "1") await new Promise((r) => setTimeout(r, 1200));
     break;
   }
