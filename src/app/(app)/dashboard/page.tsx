@@ -54,6 +54,11 @@ export default async function DashboardPage() {
   const flash = stats.pmsFlash;
   const flashAt = formatFlashCollectedAt(flash?.collectedAt || stats.pmsFlashAt?.toISOString());
   const flashProvider = stats.pmsFlashProvider;
+  // One tile each. The PMS flash card is the copy to keep when that metric was collected.
+  // Otherwise keep the in-app count below, and do not also render an empty flash card.
+  const flashOccupancy = flash?.occupancyPercent != null;
+  const flashDepartures = flash?.totalDepartures != null;
+  const flashOutOfOrder = flash?.ooo != null;
   const labelProvider: PortalPms =
     portal ?? (flashProvider === "SYNXIS" || flashProvider === "SKYTOUCH" ? flashProvider : null);
   const portalName = pmsPortalName(labelProvider);
@@ -119,10 +124,14 @@ export default async function DashboardPage() {
                   variant="success"
                 />
                 <StatCard title="Stay Overs" value={flashValue(flash.stayovers)} icon={BedDouble} />
-                <StatCard title="Departing" value={flashValue(flash.totalDepartures)} icon={LogOut} />
+                {flashDepartures && (
+                  <StatCard title="Departing" value={flashValue(flash.totalDepartures)} icon={LogOut} />
+                )}
                 <StatCard title="Checked-out" value={flashValue(flash.checkedOut)} icon={DoorOpen} />
                 <StatCard title="Arriving" value={flashValue(flash.totalArrivals)} icon={LogIn} />
-                <StatCard title="Out of Order" value={flashValue(flash.ooo)} icon={Ban} variant="warning" />
+                {flashOutOfOrder && (
+                  <StatCard title="Out of Order" value={flashValue(flash.ooo)} icon={Ban} variant="warning" />
+                )}
                 <StatCard
                   title="Out Of Inventory"
                   value={flashValue(flash.outOfInventory)}
@@ -132,12 +141,14 @@ export default async function DashboardPage() {
               </>
             ) : (
               <>
-                <StatCard
-                  title="Today's Occupancy"
-                  value={flashValue(flash.occupancyPercent, "%")}
-                  icon={Users}
-                  variant="info"
-                />
+                {flashOccupancy && (
+                  <StatCard
+                    title="Today's Occupancy"
+                    value={flashValue(flash.occupancyPercent, "%")}
+                    icon={Users}
+                    variant="info"
+                  />
+                )}
                 <StatCard
                   title="Expected ADR"
                   value={flash.expectedAdr != null ? `$${flash.expectedAdr.toFixed(2)}` : "—"}
@@ -156,7 +167,9 @@ export default async function DashboardPage() {
                   icon={ClipboardCheck}
                   variant="warning"
                 />
-                <StatCard title="Departures" value={flashValue(flash.totalDepartures)} icon={LogOut} />
+                {flashDepartures && (
+                  <StatCard title="Departures" value={flashValue(flash.totalDepartures)} icon={LogOut} />
+                )}
                 <StatCard title="Stayovers" value={flashValue(flash.stayovers)} icon={BedDouble} />
                 <StatCard title="Vacant" value={flashValue(flash.vacant)} icon={DoorOpen} />
                 <StatCard
@@ -170,7 +183,9 @@ export default async function DashboardPage() {
                   icon={Sparkles}
                   variant="danger"
                 />
-                <StatCard title="Out of Order" value={flashValue(flash.ooo)} icon={Ban} variant="warning" />
+                {flashOutOfOrder && (
+                  <StatCard title="Out of Order" value={flashValue(flash.ooo)} icon={Ban} variant="warning" />
+                )}
               </>
             )}
           </div>
@@ -241,8 +256,7 @@ export default async function DashboardPage() {
       </div>
 
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-        {/* Prefer SkyTouch Home flash when the same metric is already shown above. */}
-        {flash?.occupancyPercent == null && (
+        {!flashOccupancy && (
           <StatCard
             title="Today's Occupancy"
             value={`${stats.occupancy}%`}
@@ -254,7 +268,7 @@ export default async function DashboardPage() {
         {flash?.totalArrivals == null && (
           <StatCard title="Today's Arrivals" value={stats.arrivals} icon={LogIn} href="/map?filter=arrival" />
         )}
-        {flash?.totalDepartures == null && (
+        {!flashDepartures && (
           <StatCard title="Today's Departures" value={stats.departures} icon={LogOut} href="/map?filter=departure" />
         )}
         {flash?.vacantDirtyRemaining == null && flash?.vacantDirty == null && (
@@ -263,7 +277,7 @@ export default async function DashboardPage() {
         {flash?.vacantClean == null && (
           <StatCard title={pmsFilterLabel("clean", labelProvider)} value={stats.vacantClean} icon={CheckCircle} variant="success" href="/map?filter=clean" />
         )}
-        {flash?.ooo == null && (
+        {!flashOutOfOrder && (
           <StatCard title="Out of Order" value={stats.outOfOrder} icon={Ban} variant="warning" />
         )}
         <StatCard title="Maintenance Tickets" value={stats.maintenanceTickets} icon={Wrench} href="/maintenance" />
