@@ -1,4 +1,5 @@
 import type { PmsFlashSnapshot, PmsProvider } from "@prisma/client";
+import { hotelTimezone } from "@/lib/business-day";
 
 /** Home / Welcome / SPH Dashboard flash metrics shown on the HouseKeepAI dashboard. */
 export type PmsFlashStats = {
@@ -126,14 +127,17 @@ export function flashSnapshotCreateData(
   };
 }
 
-export function formatFlashCollectedAt(iso: string | null | undefined) {
+export function formatFlashCollectedAt(iso: string | null | undefined, timezone?: string | null) {
   if (!iso) return null;
   const date = new Date(iso);
   if (Number.isNaN(date.getTime())) return null;
-  return date.toLocaleString(undefined, {
+  const timeZone = hotelTimezone(timezone);
+  return date.toLocaleString("en-US", {
+    timeZone,
     month: "short",
     day: "numeric",
     hour: "numeric",
     minute: "2-digit",
+    timeZoneName: "short",
   });
 }

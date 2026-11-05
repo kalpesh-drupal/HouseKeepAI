@@ -1,4 +1,5 @@
 import { requireAuth } from "@/lib/session";
+import { prisma } from "@/lib/prisma";
 import { getDashboardStats } from "@/lib/queries";
 import { buildAiInsights } from "@/lib/ai";
 import { StatCard } from "@/components/stat-card";
@@ -36,10 +37,14 @@ function flashValue(value: number | null | undefined, suffix = "") {
 
 export default async function DashboardPage() {
   const session = await requireAuth();
-  const [stats, ai, portal] = await Promise.all([
+  const [stats, ai, portal, hotel] = await Promise.all([
     getDashboardStats(session.user.hotelId),
     buildAiInsights(session.user.hotelId),
     activePortalProvider(session.user.hotelId),
+    prisma.hotel.findUnique({
+      where: { id: session.user.hotelId },
+      select: { timezone: true },
+    }),
   ]);
 
   const canImport = (
@@ -52,7 +57,10 @@ export default async function DashboardPage() {
   ).includes(session.user.role);
   const canAssign = canAssignHousekeepers(session.user.role);
   const flash = stats.pmsFlash;
-  const flashAt = formatFlashCollectedAt(flash?.collectedAt || stats.pmsFlashAt?.toISOString());
+  const flashAt = formatFlashCollectedAt(
+    flash?.collectedAt || stats.pmsFlashAt?.toISOString(),
+    hotel?.timezone
+  );
   const flashProvider = stats.pmsFlashProvider;
   // One tile each. The PMS flash card is the copy to keep when that metric was collected.
   // Otherwise keep the in-app count below, and do not also render an empty flash card.

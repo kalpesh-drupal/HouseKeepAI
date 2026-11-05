@@ -1613,7 +1613,9 @@ function aggregateBoardStatusCounts(rows: BoardRow[]) {
     else if (isOccupied) counts.occupiedDirty += 1;
 
     if (/stay\s*over/.test(guest)) counts.stayovers += 1;
-    if (/checked\s*out/.test(guest)) counts.checkedOut += 1;
+    // parseGuest canonicalizes this column to "Checked-out" (hyphen). A whitespace-only
+    // pattern never matches that label, so the tile was stored as null.
+    if (/\bchecked[-\s]?outs?\b/.test(guest)) counts.checkedOut += 1;
     if (/day\s*use/.test(guest) || /day\s*use/.test(blob)) counts.dayUse += 1;
     if (/arriv/.test(guest)) counts.arriving += 1;
     if (/due\s*out|depart/.test(guest)) counts.departing += 1;
