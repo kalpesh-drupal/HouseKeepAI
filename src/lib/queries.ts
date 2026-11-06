@@ -1,5 +1,5 @@
 import { prisma } from "./prisma";
-import { UserRole, RoomStatus, CleaningStatus, CleaningOutcome } from "@prisma/client";
+import { UserRole, RoomStatus, CleaningStatus, CleaningOutcome, MessageChannel } from "@prisma/client";
 import {
   businessDate,
   businessDateFromKey,
@@ -247,6 +247,30 @@ export async function getFrontDeskData(hotelId: string) {
   ]);
 
   return { cleanRooms, dirtyRooms, arrivals, departures, rushRooms, guestRequests, maintenanceIssues };
+}
+
+export type RoomDeskNoteRow = {
+  id: string;
+  roomId: string;
+  message: string;
+  createdAt: Date;
+};
+
+/** Front-desk broadcasts already stored on Message, attached by roomId. */
+export async function getRoomDeskNotes(hotelId: string, roomIds?: string[]): Promise<RoomDeskNoteRow[]> {
+  if (roomIds && roomIds.length === 0) return [];
+  const rows = await prisma.message.findMany({
+    where: {
+      hotelId,
+      channel: MessageChannel.FRONT_DESK_HOUSEKEEPING,
+      roomId: roomIds ? { in: roomIds } : { not: null },
+    },
+    orderBy: { createdAt: "desc" },
+    select: { id: true, roomId: true, content: true, createdAt: true },
+  });
+  return rows.flatMap((row) =>
+    row.roomId ? [{ id: row.id, roomId: row.roomId, message: row.content, createdAt: row.createdAt }] : []
+  );
 }
 
 export async function getInventory(hotelId: string) {

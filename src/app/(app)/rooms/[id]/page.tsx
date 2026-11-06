@@ -1,5 +1,5 @@
 import { requireAuth } from "@/lib/session";
-import { getRoomById } from "@/lib/queries";
+import { getRoomById, getRoomDeskNotes } from "@/lib/queries";
 import { prisma } from "@/lib/prisma";
 import { notFound } from "next/navigation";
 import { canAssignHousekeepers, CLEANING_STAFF_ROLES, cleaningStaffLabel, guestStayLabel, ROOM_STATUS_CONFIG } from "@/lib/utils";
@@ -13,12 +13,13 @@ import { ArrowLeft, Crown, Zap } from "lucide-react";
 import { RoomStayCue } from "@/components/room-stay-cue";
 import { activePortalProvider } from "@/lib/pms/active-provider";
 import { pmsRoomLabel } from "@/lib/pms/pms-labels";
+import { RoomDeskNotes } from "@/components/room-desk-notes";
 
 export default async function RoomDetailsPage({ params }: { params: Promise<{ id: string }> }) {
   const session = await requireAuth();
   const { id } = await params;
   const canAssign = canAssignHousekeepers(session.user.role);
-  const [room, housekeepers, pmsProvider] = await Promise.all([
+  const [room, housekeepers, pmsProvider, deskNotes] = await Promise.all([
     getRoomById(id, session.user.hotelId),
     canAssign
       ? prisma.user.findMany({
@@ -28,6 +29,7 @@ export default async function RoomDetailsPage({ params }: { params: Promise<{ id
         })
       : Promise.resolve([]),
     activePortalProvider(session.user.hotelId),
+    getRoomDeskNotes(session.user.hotelId, [id]),
   ]);
 
   if (!room) notFound();
@@ -63,6 +65,8 @@ export default async function RoomDetailsPage({ params }: { params: Promise<{ id
           <p className={`font-semibold ${statusConfig.text}`}>{pmsRoomLabel(room.status, room.guestStatus, pmsProvider)}</p>
         </div>
       </div>
+
+      <RoomDeskNotes notes={deskNotes} />
 
       <div className="grid gap-6 md:grid-cols-2">
         <div className="rounded-2xl border border-border bg-card p-6">

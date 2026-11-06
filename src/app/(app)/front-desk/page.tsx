@@ -1,112 +1,149 @@
 import { requireAuth } from "@/lib/session";
-import { getFrontDeskData } from "@/lib/queries";
+import { getFrontDeskData, getRoomDeskNotes, getRoomsForUser } from "@/lib/queries";
 import { prisma } from "@/lib/prisma";
 import Link from "next/link";
-import { guestStayLabel, ROOM_STATUS_CONFIG } from "@/lib/utils";
-import { FrontDeskActions } from "@/components/front-desk-actions";
+import { CLEANING_STAFF_ROLES, cleaningStaffLabel, guestStayLabel, ROOM_STATUS_CONFIG } from "@/lib/utils";
 import { activePortalProvider } from "@/lib/pms/active-provider";
-import { pmsFilterLabel, pmsRoomLabel } from "@/lib/pms/pms-labels";
+import { pmsRoomLabel } from "@/lib/pms/pms-labels";
+import { RoomDeskNoteForm } from "@/components/room-desk-note-form";
 
 export default async function FrontDeskPage() {
   const session = await requireAuth();
-  const [data, allRooms, pmsProvider] = await Promise.all([
-    getFrontDeskData(session.user.hotelId),
-    prisma.room.findMany({
-      where: { hotelId: session.user.hotelId },
-      select: { id: true, number: true },
-      orderBy: { number: "asc" },
+  const hotelId = session.user.hotelId;
+  const [data, rooms, housekeepers, notes, pmsProvider] = await Promise.all([
+    getFrontDeskData(hotelId),
+    getRoomsForUser(hotelId, session.user.id, session.user.role),
+    prisma.user.findMany({
+      where: { hotelId, role: { in: CLEANING_STAFF_ROLES }, active: true },
+      select: { id: true, name: true, role: true },
+      orderBy: [{ role: "asc" }, { name: "asc" }],
     }),
-    activePortalProvider(session.user.hotelId),
+    getRoomDeskNotes(hotelId),
+    activePortalProvider(hotelId),
   ]);
 
-  const cleanWord = pmsFilterLabel("clean", pmsProvider);
-  const dirtyWord = pmsFilterLabel("dirty", pmsProvider);
-  const sections = [
-    { title: `${cleanWord} Rooms`, rooms: data.cleanRooms },
-    { title: `${dirtyWord} Rooms`, rooms: data.dirtyRooms },
-    { title: "Expected Arrivals", rooms: data.arrivals },
-    { title: "Expected Departures", rooms: data.departures },
-    { title: "Rush Rooms", rooms: data.rushRooms },
-  ];
+  const latestNote = new Map<string, (typeof notes)[number]>();
+  for (const note of notes) {
+    if (!latestNote.has(note.roomId)) latestNote.set(note.roomId, note);
+  }
 
   return (
     <div className="space-y-6">
       <div>
         <h1 className="text-3xl font-bold">Front Desk</h1>
         <p className="text-muted-foreground">
-          Mark clean or dirty, VIP, rush, move, block, or out of order — without leaving this screen.
-          {pmsProvider === "SYNXIS"
-            ? " Mark clean also queues SynXis Clean when portal sync is on."
-            : pmsProvider === "SKYTOUCH"
-              ? " Mark clean also queues SkyTouch Ready when portal sync is on."
-              : " Mark clean also queues the hotel PMS when portal sync is on."}
+          Dirty rooms, the housekeeping team, and a message the housekeeper can read on the room.
         </p>
       </div>
 
-      <div className="grid gap-6 lg:grid-cols-2">
-        {sections.map((section) => (
-          <div key={section.title} className="rounded-2xl border border-border bg-card p-6">
-            <h2 className="mb-4 font-semibold">{section.title} ({section.rooms.length})</h2>
-            {section.rooms.length === 0 ? (
-              <p className="text-sm text-muted-foreground">None</p>
-            ) : (
-              <div className="space-y-3">
-                {section.rooms.map((room) => (
-                  <div key={room.id} className={`rounded-xl p-3 ${ROOM_STATUS_CONFIG[room.status].bg}`}>
-                    <div className="flex items-center justify-between">
-                      <Link href={`/rooms/${room.id}`} className="font-semibold hover:underline">
-                        Room {room.number}
-                        {room.isVip ? " ★" : ""}
-                        {room.isRush ? " ⚡" : ""}
-                      </Link>
-                      <span className="text-xs">{pmsRoomLabel(room.status, room.guestStatus, pmsProvider)}</span>
+      <div className="grid gap-6 lg:grid-cols-3">
+        <section className="rounded-2xl border border-border bg-card p-6">
+          <h2 className="mb-4 font-semibold">Dirty rooms ({data.dirtyRooms.length})</h2>
+          {data.dirtyRooms.length === 0 ? (
+            <p className="text-sm text-muted-foreground">None</p>
+          ) : (
+            <div className="max-h-[28rem] space-y-3 overflow-y-auto pr-1">
+              {data.dirtyRooms.map((room) => {
+                const config = ROOM_STATUS_CONFIG[room.status];
+                const stay = guestStayLabel(room.guestStatus, room.status);
+                const note = latestNote.get(room.id);
+                return (
+                  <div key={room.id} className={`rounded-xl p-3 ${config.bg}`}>
+                    <Link href={`/rooms/${room.id}`} className="font-semibold hover:underline">
+                      Room {room.number}
+                    </Link>
+                    <div className="mt-2 flex flex-wrap gap-1">
+                      <span className={`rounded-full bg-white px-2 py-0.5 text-xs font-medium ${config.text}`}>
+                        {pmsRoomLabel(room.status, room.guestStatus, pmsProvider)}
+                      </span>
+                      <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${stay.className}`}>
+                        {stay.label}
+                      </span>
                     </div>
-                    <p className={`mt-1 inline-block rounded-full px-2 py-0.5 text-xs font-medium ${guestStayLabel(room.guestStatus, room.status).className}`}>
-                      {guestStayLabel(room.guestStatus, room.status).label}
-                    </p>
-                    <FrontDeskActions
-                      room={{
-                        id: room.id,
-                        number: room.number,
-                        status: room.status,
-                        isVip: room.isVip,
-                        isRush: room.isRush,
-                      }}
-                      allRooms={allRooms}
-                    />
+                    {note && (
+                      <p className="mt-2 text-xs text-muted-foreground">
+                        {note.message}
+                      </p>
+                    )}
                   </div>
-                ))}
-              </div>
-            )}
-          </div>
-        ))}
+                );
+              })}
+            </div>
+          )}
+        </section>
+
+        <section className="rounded-2xl border border-border bg-card p-6">
+          <h2 className="mb-4 font-semibold">Housekeepers ({housekeepers.length})</h2>
+          {housekeepers.length === 0 ? (
+            <p className="text-sm text-muted-foreground">No active housekeepers.</p>
+          ) : (
+            <ul className="max-h-[28rem] space-y-2 overflow-y-auto pr-1">
+              {housekeepers.map((hk) => (
+                <li key={hk.id} className="rounded-xl bg-muted px-4 py-3 text-sm font-medium">
+                  {cleaningStaffLabel(hk.name, hk.role)}
+                </li>
+              ))}
+            </ul>
+          )}
+        </section>
+
+        <section className="rounded-2xl border border-border bg-card p-6">
+          <h2 className="mb-1 font-semibold">Message a room</h2>
+          <p className="mb-4 text-sm text-muted-foreground">
+            Enter the room number and the message. It stays on that room for the housekeeper.
+          </p>
+          <RoomDeskNoteForm />
+        </section>
       </div>
 
-      <div className="grid gap-6 lg:grid-cols-2">
-        <div className="rounded-2xl border border-border bg-card p-6">
-          <h2 className="mb-4 font-semibold">Guest Requests ({data.guestRequests.length})</h2>
-          <div className="space-y-2">
-            {data.guestRequests.map((req) => (
-              <div key={req.id} className="flex items-center justify-between rounded-lg bg-muted px-4 py-3 text-sm">
-                <span>Room {req.room.number}: {req.type}</span>
-                <span className="rounded-full bg-white px-2 py-1 text-xs">{req.status}</span>
-              </div>
-            ))}
-          </div>
+      <section className="space-y-4">
+        <div>
+          <h2 className="text-xl font-semibold">Who has which room</h2>
+          <p className="text-sm text-muted-foreground">Rooms currently assigned to each housekeeper.</p>
         </div>
-
-        <div className="rounded-2xl border border-border bg-card p-6">
-          <h2 className="mb-4 font-semibold">Maintenance Issues ({data.maintenanceIssues.length})</h2>
-          <div className="space-y-2">
-            {data.maintenanceIssues.map((ticket) => (
-              <div key={ticket.id} className="flex items-center justify-between rounded-lg bg-muted px-4 py-3 text-sm">
-                <span>Room {ticket.room.number}: {ticket.title}</span>
-                <span className="rounded-full bg-white px-2 py-1 text-xs">{ticket.status}</span>
-              </div>
-            ))}
+        {housekeepers.length === 0 ? (
+          <div className="rounded-2xl border border-border bg-card p-6 text-sm text-muted-foreground">
+            No active housekeepers.
           </div>
-        </div>
-      </div>
+        ) : (
+          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+            {housekeepers.map((hk) => {
+              const assigned = rooms.filter((room) => room.housekeeperId === hk.id);
+              return (
+                <div key={hk.id} className="rounded-2xl border border-border bg-card p-6">
+                  <h3 className="font-semibold">{cleaningStaffLabel(hk.name, hk.role)}</h3>
+                  <p className="mb-3 text-xs text-muted-foreground">{assigned.length} room{assigned.length === 1 ? "" : "s"}</p>
+                  {assigned.length === 0 ? (
+                    <p className="text-sm text-muted-foreground">No rooms assigned.</p>
+                  ) : (
+                    <ul className="space-y-2">
+                      {assigned.map((room) => {
+                        const config = ROOM_STATUS_CONFIG[room.status];
+                        const stay = guestStayLabel(room.guestStatus, room.status);
+                        return (
+                          <li key={room.id} className="flex flex-wrap items-center justify-between gap-2 rounded-lg bg-muted px-3 py-2 text-sm">
+                            <Link href={`/rooms/${room.id}`} className="font-medium hover:underline">
+                              {room.number}
+                            </Link>
+                            <span className="flex flex-wrap gap-1">
+                              <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${config.bg} ${config.text}`}>
+                                {pmsRoomLabel(room.status, room.guestStatus, pmsProvider)}
+                              </span>
+                              <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${stay.className}`}>
+                                {stay.label}
+                              </span>
+                            </span>
+                          </li>
+                        );
+                      })}
+                    </ul>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </section>
     </div>
   );
 }

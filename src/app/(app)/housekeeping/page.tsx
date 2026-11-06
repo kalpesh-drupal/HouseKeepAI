@@ -1,5 +1,5 @@
 import { requireAuth } from "@/lib/session";
-import { getRoomsForUser, getRoomsReadyToInspect } from "@/lib/queries";
+import { getRoomDeskNotes, getRoomsForUser, getRoomsReadyToInspect } from "@/lib/queries";
 import { prisma } from "@/lib/prisma";
 import Link from "next/link";
 import { ChecklistToggle } from "@/components/checklist-toggle";
@@ -12,12 +12,13 @@ import { ReadyToInspectList } from "@/components/ready-to-inspect-list";
 import { RoomStayCue } from "@/components/room-stay-cue";
 import { activePortalProvider } from "@/lib/pms/active-provider";
 import { pmsRoomLabel } from "@/lib/pms/pms-labels";
+import { RoomDeskNotes } from "@/components/room-desk-notes";
 
 export default async function HousekeepingPage() {
   const session = await requireAuth();
   const canAssign = canAssignHousekeepers(session.user.role);
   const canInspect = canInspectRooms(session.user.role);
-  const [rooms, housekeepers, readyRooms, pmsProvider] = await Promise.all([
+  const [rooms, housekeepers, readyRooms, pmsProvider, deskNotes] = await Promise.all([
     getRoomsForUser(session.user.hotelId, session.user.id, session.user.role),
     canAssign
       ? prisma.user.findMany({
@@ -28,6 +29,7 @@ export default async function HousekeepingPage() {
       : Promise.resolve([]),
     canInspect ? getRoomsReadyToInspect(session.user.hotelId) : Promise.resolve([]),
     activePortalProvider(session.user.hotelId),
+    getRoomDeskNotes(session.user.hotelId),
   ]);
   const myRooms =
     session.user.role === "HOUSEKEEPER"
@@ -143,6 +145,8 @@ export default async function HousekeepingPage() {
                     </div>
                   </div>
                 </div>
+
+                <RoomDeskNotes notes={deskNotes.filter((note) => note.roomId === room.id)} />
 
                 <div className="space-y-2">
                   <h3 className="font-medium">Checklist</h3>

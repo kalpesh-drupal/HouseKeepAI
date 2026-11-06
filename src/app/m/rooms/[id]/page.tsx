@@ -1,5 +1,5 @@
 import { requireAuth } from "@/lib/session";
-import { getRoomById } from "@/lib/queries";
+import { getRoomById, getRoomDeskNotes } from "@/lib/queries";
 import { prisma } from "@/lib/prisma";
 import { notFound } from "next/navigation";
 import { guestStayLabel, ROOM_STATUS_CONFIG } from "@/lib/utils";
@@ -13,6 +13,7 @@ import { ArrowLeft } from "lucide-react";
 import { RoomStayCue } from "@/components/room-stay-cue";
 import { activePortalProvider } from "@/lib/pms/active-provider";
 import { pmsRoomLabel } from "@/lib/pms/pms-labels";
+import { RoomDeskNotes } from "@/components/room-desk-notes";
 
 const LINEN_CATEGORIES = ["Towels", "Pillows", "Sheets", "Blankets"];
 
@@ -28,9 +29,10 @@ export default async function MobileRoomPage({
   const session = await requireAuth(undefined, "/login?callbackUrl=/m");
   const { id } = await params;
   const query = await searchParams;
-  const [room, pmsProvider] = await Promise.all([
+  const [room, pmsProvider, deskNotes] = await Promise.all([
     getRoomById(id, session.user.hotelId),
     activePortalProvider(session.user.hotelId),
+    getRoomDeskNotes(session.user.hotelId, [id]),
   ]);
   if (!room) notFound();
   const cfg = ROOM_STATUS_CONFIG[room.status];
@@ -73,6 +75,8 @@ export default async function MobileRoomPage({
       <p className="text-sm text-muted-foreground">
         Guest: {room.guestName || "—"} · {guestStayLabel(room.guestStatus, room.status).label} · HK: {room.housekeeper?.name || "Unassigned"} · Est. {room.estimatedMinutes} min
       </p>
+
+      <RoomDeskNotes notes={deskNotes} />
 
       <MobileRoomWork
         roomId={room.id}

@@ -1,5 +1,5 @@
 import { requireAuth } from "@/lib/session";
-import { getRoomsForUser } from "@/lib/queries";
+import { getRoomDeskNotes, getRoomsForUser } from "@/lib/queries";
 import Link from "next/link";
 import { guestStayLabel, ROOM_STATUS_CONFIG } from "@/lib/utils";
 import { MobileRoomActions } from "@/components/mobile-room-actions";
@@ -8,12 +8,14 @@ import { RoomCacheHydrator } from "@/components/room-cache-hydrator";
 import { RoomStayCue } from "@/components/room-stay-cue";
 import { activePortalProvider } from "@/lib/pms/active-provider";
 import { pmsRoomLabel } from "@/lib/pms/pms-labels";
+import { RoomDeskNotes } from "@/components/room-desk-notes";
 
 export default async function MobileHousekeepingPage() {
   const session = await requireAuth();
-  const [rooms, pmsProvider] = await Promise.all([
+  const [rooms, pmsProvider, deskNotes] = await Promise.all([
     getRoomsForUser(session.user.hotelId, session.user.id, session.user.role),
     activePortalProvider(session.user.hotelId),
+    getRoomDeskNotes(session.user.hotelId),
   ]);
 
   return (
@@ -80,6 +82,7 @@ export default async function MobileHousekeepingPage() {
                 {room.isVip ? " · VIP" : ""}
                 {room.isRush ? " · RUSH" : ""}
               </p>
+              <RoomDeskNotes notes={deskNotes.filter((note) => note.roomId === room.id)} />
               <div className="mb-3 grid grid-cols-2 gap-1">
                 {room.checklistItems.slice(0, 6).map((item) => (
                   <div key={item.id} className="rounded-lg bg-muted px-2 py-1 text-xs">
