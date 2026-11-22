@@ -1,13 +1,14 @@
 import { requireAuth } from "@/lib/session";
-import { getHotelUsers, getMessages } from "@/lib/queries";
+import { getHotelUsers, getLatestRoomDeskNotes, getMessages } from "@/lib/queries";
 import { prisma } from "@/lib/prisma";
 import { MessageComposer } from "@/components/message-composer";
 import { ROLE_LABELS } from "@/lib/utils";
 import Link from "next/link";
+import { RoomDeskNoteFeed } from "@/components/room-desk-note-feed";
 
 export default async function MobileMessagesPage() {
   const session = await requireAuth(undefined, "/login?callbackUrl=/m/messages");
-  const [messages, users, rooms] = await Promise.all([
+  const [messages, users, rooms, deskNotes] = await Promise.all([
     getMessages(session.user.hotelId, session.user.id),
     getHotelUsers(session.user.hotelId),
     prisma.room.findMany({
@@ -15,6 +16,7 @@ export default async function MobileMessagesPage() {
       select: { id: true, number: true },
       orderBy: { number: "asc" },
     }),
+    getLatestRoomDeskNotes(session.user.hotelId),
   ]);
 
   const recipients = users.filter((u) => u.id !== session.user.id);
@@ -25,6 +27,8 @@ export default async function MobileMessagesPage() {
         <h2 className="text-xl font-bold">Team chat</h2>
         <p className="text-sm text-muted-foreground">Message housekeepers, front desk, maintenance, and managers.</p>
       </div>
+
+      <RoomDeskNoteFeed notes={deskNotes} poll />
 
       <MessageComposer users={recipients} rooms={rooms} />
 

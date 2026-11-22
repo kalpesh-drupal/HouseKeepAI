@@ -273,6 +273,30 @@ export async function getRoomDeskNotes(hotelId: string, roomIds?: string[]): Pro
   );
 }
 
+export type LatestRoomDeskNote = RoomDeskNoteRow & { roomNumber: string };
+
+/** Newest front-desk message on each room, with the room number for the housekeeper. */
+export async function getLatestRoomDeskNotes(hotelId: string): Promise<LatestRoomDeskNote[]> {
+  const notes = await getRoomDeskNotes(hotelId);
+  const latest: RoomDeskNoteRow[] = [];
+  const seen = new Set<string>();
+  for (const note of notes) {
+    if (seen.has(note.roomId)) continue;
+    seen.add(note.roomId);
+    latest.push(note);
+  }
+  if (latest.length === 0) return [];
+  const rooms = await prisma.room.findMany({
+    where: { hotelId, id: { in: latest.map((note) => note.roomId) } },
+    select: { id: true, number: true },
+  });
+  const numbers = new Map(rooms.map((room) => [room.id, room.number]));
+  return latest.flatMap((note) => {
+    const roomNumber = numbers.get(note.roomId);
+    return roomNumber ? [{ ...note, roomNumber }] : [];
+  });
+}
+
 export async function getInventory(hotelId: string) {
   return prisma.inventoryItem.findMany({
     where: { hotelId },

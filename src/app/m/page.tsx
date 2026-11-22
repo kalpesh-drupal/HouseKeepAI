@@ -1,16 +1,17 @@
 import { requireAuth } from "@/lib/session";
-import { getRoomsForUser } from "@/lib/queries";
+import { getLatestRoomDeskNotes, getRoomsForUser } from "@/lib/queries";
 import { prisma } from "@/lib/prisma";
 import { ROLE_LABELS } from "@/lib/utils";
 import Link from "next/link";
 import { ClipboardCheck, KeyRound, MessageSquare, Search, Sparkles, Wrench } from "lucide-react";
+import { RoomDeskNoteFeed } from "@/components/room-desk-note-feed";
 
 export default async function MobileDashboardPage() {
   const session = await requireAuth(undefined, "/login?mobile=1&callbackUrl=/m");
   const role = session.user.role;
   const hotelId = session.user.hotelId;
 
-  const [rooms, openTickets, pendingInspections, messages] = await Promise.all([
+  const [rooms, openTickets, pendingInspections, messages, deskNotes] = await Promise.all([
     getRoomsForUser(hotelId, session.user.id, role),
     prisma.maintenanceTicket.count({ where: { hotelId, status: { not: "COMPLETED" } } }),
     prisma.room.count({
@@ -27,6 +28,7 @@ export default async function MobileDashboardPage() {
         NOT: { senderId: session.user.id },
       },
     }),
+    getLatestRoomDeskNotes(hotelId),
   ]);
 
   const dirty = rooms.filter((r) => r.status === "VACANT_DIRTY" || r.status === "CLEANING").length;
@@ -83,6 +85,8 @@ export default async function MobileDashboardPage() {
         <h2 className="text-2xl font-bold">Hi, {session.user.name?.split(" ")[0] || "there"}</h2>
         <p className="text-sm text-muted-foreground">{session.user.hotelName}</p>
       </div>
+
+      <RoomDeskNoteFeed notes={deskNotes} poll />
 
       <div className="grid gap-3">
         {cards.map((card) => {

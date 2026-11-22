@@ -13,7 +13,7 @@ import { ArrowLeft } from "lucide-react";
 import { RoomStayCue } from "@/components/room-stay-cue";
 import { activePortalProvider } from "@/lib/pms/active-provider";
 import { pmsRoomLabel } from "@/lib/pms/pms-labels";
-import { RoomDeskNotes } from "@/components/room-desk-notes";
+import { RoomDeskNoteFeed } from "@/components/room-desk-note-feed";
 
 const LINEN_CATEGORIES = ["Towels", "Pillows", "Sheets", "Blankets"];
 
@@ -59,6 +59,11 @@ export default async function MobileRoomPage({
             Room {room.number}
             <CleaningTimer startedAt={room.cleaningStartedAt} active={room.status === "CLEANING"} />
           </h2>
+          <RoomDeskNoteFeed
+            roomId={room.id}
+            poll
+            notes={deskNotes.slice(0, 1).map((note) => ({ ...note, roomNumber: room.number }))}
+          />
           <div className="mt-2">
             <RoomStayCue
               roomId={room.id}
@@ -75,8 +80,6 @@ export default async function MobileRoomPage({
       <p className="text-sm text-muted-foreground">
         Guest: {room.guestName || "—"} · {guestStayLabel(room.guestStatus, room.status).label} · HK: {room.housekeeper?.name || "Unassigned"} · Est. {room.estimatedMinutes} min
       </p>
-
-      <RoomDeskNotes notes={deskNotes} />
 
       <MobileRoomWork
         roomId={room.id}

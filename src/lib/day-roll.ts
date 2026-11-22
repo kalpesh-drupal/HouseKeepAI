@@ -98,6 +98,14 @@ export async function rollHotelDay(hotelId: string, now = new Date()) {
     });
   }
 
+  // Night audit: clear every housekeeper assignment so morning starts with a fresh list.
+  // Day snapshots above still keep who was assigned when the day closed.
+  const cleared = await prisma.room.updateMany({
+    where: { hotelId, housekeeperId: { not: null } },
+    data: { housekeeperId: null, isRush: false, priority: 0 },
+  });
+  const clearedAssignments = cleared.count;
+
   await prisma.hotel.update({
     where: { id: hotelId },
     data: { businessDate: current },
@@ -108,6 +116,7 @@ export async function rollHotelDay(hotelId: string, now = new Date()) {
     closed: businessDateKey(closing),
     businessDate: businessDateKey(current),
     rooms: rooms.length,
+    clearedAssignments,
   };
 }
 

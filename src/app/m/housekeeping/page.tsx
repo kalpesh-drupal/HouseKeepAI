@@ -1,5 +1,5 @@
 import { requireAuth } from "@/lib/session";
-import { getRoomDeskNotes, getRoomsForUser } from "@/lib/queries";
+import { getLatestRoomDeskNotes, getRoomsForUser } from "@/lib/queries";
 import Link from "next/link";
 import { guestStayLabel, ROOM_STATUS_CONFIG } from "@/lib/utils";
 import { MobileRoomActions } from "@/components/mobile-room-actions";
@@ -9,13 +9,14 @@ import { RoomStayCue } from "@/components/room-stay-cue";
 import { activePortalProvider } from "@/lib/pms/active-provider";
 import { pmsRoomLabel } from "@/lib/pms/pms-labels";
 import { RoomDeskNotes } from "@/components/room-desk-notes";
+import { RoomDeskNoteFeed } from "@/components/room-desk-note-feed";
 
 export default async function MobileHousekeepingPage() {
   const session = await requireAuth();
   const [rooms, pmsProvider, deskNotes] = await Promise.all([
     getRoomsForUser(session.user.hotelId, session.user.id, session.user.role),
     activePortalProvider(session.user.hotelId),
-    getRoomDeskNotes(session.user.hotelId),
+    getLatestRoomDeskNotes(session.user.hotelId),
   ]);
 
   return (
@@ -42,6 +43,8 @@ export default async function MobileHousekeepingPage() {
         <h2 className="text-xl font-bold">Today&apos;s Rooms</h2>
         <p className="text-sm text-muted-foreground">{rooms.length} assigned</p>
       </div>
+
+      <RoomDeskNoteFeed notes={deskNotes} poll />
 
       {rooms.length === 0 ? (
         <div className="rounded-2xl border border-border bg-card p-8 text-center text-sm text-muted-foreground">
@@ -74,6 +77,7 @@ export default async function MobileHousekeepingPage() {
                   HK: {pmsRoomLabel(room.status, room.guestStatus, pmsProvider)}
                 </span>
               </div>
+              <RoomDeskNotes notes={deskNotes.filter((note) => note.roomId === room.id)} />
               <p className={`mb-2 inline-block rounded-full px-2 py-1 text-xs font-medium ${guestStayLabel(room.guestStatus, room.status).className}`}>
                 {guestStayLabel(room.guestStatus, room.status).label}
               </p>
@@ -82,7 +86,6 @@ export default async function MobileHousekeepingPage() {
                 {room.isVip ? " · VIP" : ""}
                 {room.isRush ? " · RUSH" : ""}
               </p>
-              <RoomDeskNotes notes={deskNotes.filter((note) => note.roomId === room.id)} />
               <div className="mb-3 grid grid-cols-2 gap-1">
                 {room.checklistItems.slice(0, 6).map((item) => (
                   <div key={item.id} className="rounded-lg bg-muted px-2 py-1 text-xs">

@@ -86,6 +86,9 @@ export default function App() {
           style={styles.webview}
           originWhitelist={["*"]}
           allowsBackForwardNavigationGestures
+          cacheEnabled={false}
+          cacheMode="LOAD_NO_CACHE"
+          pullToRefreshEnabled
           startInLoadingState
           sharedCookiesEnabled
           thirdPartyCookiesEnabled

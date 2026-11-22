@@ -3,6 +3,7 @@ import { MessageChannel, UserRole } from "@prisma/client";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
+import { getLatestRoomDeskNotes, getRoomDeskNotes } from "@/lib/queries";
 
 const DESK_ROLES: UserRole[] = [UserRole.FRONT_DESK, UserRole.GENERAL_MANAGER, UserRole.OWNER];
 
@@ -11,6 +12,38 @@ function roomNumberFromInput(raw: unknown) {
     .trim()
     .replace(/^room\s+/i, "")
     .trim();
+}
+
+export async function GET(req: NextRequest) {
+  const session = await getServerSession(authOptions);
+  if (!session?.user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+
+  const roomId = req.nextUrl.searchParams.get("roomId");
+  if (roomId) {
+    const room = await prisma.room.findFirst({
+      where: { id: roomId, hotelId: session.user.hotelId },
+      select: { id: true, number: true },
+    });
+    if (!room) return NextResponse.json({ error: "Room not found" }, { status: 404 });
+    const notes = await getRoomDeskNotes(session.user.hotelId, [room.id]);
+    const latest = notes[0];
+    return NextResponse.json({
+      notes: latest
+        ? [
+            {
+              id: latest.id,
+              roomId: latest.roomId,
+              roomNumber: room.number,
+              message: latest.message,
+              createdAt: latest.createdAt,
+            },
+          ]
+        : [],
+    });
+  }
+
+  const notes = await getLatestRoomDeskNotes(session.user.hotelId);
+  return NextResponse.json({ notes });
 }
 
 export async function POST(req: NextRequest) {
