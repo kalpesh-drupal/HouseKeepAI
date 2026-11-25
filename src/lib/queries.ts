@@ -10,6 +10,7 @@ import {
   type ReportPeriod,
 } from "@/lib/business-day";
 import { flashStatsFromSnapshot, parseFlashStatsJson } from "@/lib/pms/flash-stats";
+import { CLEANING_STAFF_ROLES } from "@/lib/utils";
 
 export async function getDashboardStats(hotelId: string) {
   const today = new Date();
@@ -144,7 +145,7 @@ export async function getRoomsForUser(hotelId: string, userId: string, role: Use
     maintenanceTickets: { where: { status: { not: "COMPLETED" as const } } },
   };
 
-  if (role === UserRole.HOUSEKEEPER) {
+  if (role === UserRole.HOUSEKEEPER || role === UserRole.INSPECTOR) {
     return prisma.room.findMany({
       where: { hotelId, housekeeperId: userId },
       include: baseInclude,
@@ -394,7 +395,7 @@ export async function getReportData(
         where: {
           hotelId,
           active: true,
-          role: { in: [UserRole.HOUSEKEEPER, UserRole.EXECUTIVE_HOUSEKEEPER] },
+          role: { in: CLEANING_STAFF_ROLES },
         },
         select: { id: true, name: true },
         orderBy: { name: "asc" },

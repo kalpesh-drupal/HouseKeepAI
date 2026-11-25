@@ -23,7 +23,7 @@ export function MobileShell({
 
   const tabs = [
     { href: "/m", label: "Home", icon: Home, show: true },
-    { href: "/m/housekeeping", label: t("housekeeping"), icon: Sparkles, show: ["HOUSEKEEPER", "EXECUTIVE_HOUSEKEEPER", "OWNER", "GENERAL_MANAGER"].includes(role) },
+    { href: "/m/housekeeping", label: t("housekeeping"), icon: Sparkles, show: ["HOUSEKEEPER", "EXECUTIVE_HOUSEKEEPER", "INSPECTOR", "OWNER", "GENERAL_MANAGER"].includes(role) },
     { href: "/m/maintenance", label: t("maintenance"), icon: Wrench, show: ["MAINTENANCE", "OWNER", "GENERAL_MANAGER", "FRONT_DESK"].includes(role) },
     { href: "/m/inspection", label: t("inspection"), icon: ClipboardCheck, show: ["INSPECTOR", "EXECUTIVE_HOUSEKEEPER", "OWNER", "GENERAL_MANAGER"].includes(role) },
     { href: "/m/lost-found", label: t("lostFound"), icon: Search, show: ["HOUSEKEEPER", "FRONT_DESK", "EXECUTIVE_HOUSEKEEPER", "GENERAL_MANAGER", "OWNER", "MAINTENANCE", "INSPECTOR"].includes(role) },

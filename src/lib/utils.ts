@@ -56,7 +56,7 @@ export const INSPECTION_CHECKLIST_ITEMS = [
 export const NAV_ITEMS = [
   { href: "/dashboard", label: "Dashboard", icon: "LayoutDashboard", roles: "all" as const },
   { href: "/map", label: "Hotel Map", icon: "Map", roles: "all" as const },
-  { href: "/housekeeping", label: "Housekeeping", icon: "Sparkles", roles: [UserRole.HOUSEKEEPER, UserRole.EXECUTIVE_HOUSEKEEPER, UserRole.GENERAL_MANAGER, UserRole.OWNER, UserRole.FRONT_DESK] },
+  { href: "/housekeeping", label: "Housekeeping", icon: "Sparkles", roles: [UserRole.HOUSEKEEPER, UserRole.EXECUTIVE_HOUSEKEEPER, UserRole.INSPECTOR, UserRole.GENERAL_MANAGER, UserRole.OWNER, UserRole.FRONT_DESK] },
   { href: "/inspection", label: "Inspection", icon: "ClipboardCheck", roles: [UserRole.INSPECTOR, UserRole.EXECUTIVE_HOUSEKEEPER, UserRole.GENERAL_MANAGER, UserRole.OWNER] },
   { href: "/maintenance", label: "Maintenance", icon: "Wrench", roles: [UserRole.MAINTENANCE, UserRole.GENERAL_MANAGER, UserRole.OWNER, UserRole.FRONT_DESK] },
   { href: "/front-desk", label: "Front Desk", icon: "ConciergeBell", roles: [UserRole.FRONT_DESK, UserRole.GENERAL_MANAGER, UserRole.OWNER] },
@@ -97,6 +97,7 @@ const ASSIGN_HOUSEKEEPER_ROLES: UserRole[] = [
 export const CLEANING_STAFF_ROLES: UserRole[] = [
   UserRole.HOUSEKEEPER,
   UserRole.EXECUTIVE_HOUSEKEEPER,
+  UserRole.INSPECTOR,
 ];
 
 const INSPECT_ROLES: UserRole[] = [
@@ -131,7 +132,9 @@ export function canSetRoomHkStatus(role: UserRole) {
 }
 
 export function cleaningStaffLabel(name: string, role: UserRole) {
-  return role === UserRole.EXECUTIVE_HOUSEKEEPER ? `${name} (Head housekeeper)` : name;
+  if (role === UserRole.EXECUTIVE_HOUSEKEEPER) return `${name} (Executive housekeeper)`;
+  if (role === UserRole.INSPECTOR) return `${name} (Inspector)`;
+  return name;
 }
 
 export function cn(...classes: (string | boolean | undefined | null)[]) {

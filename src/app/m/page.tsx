@@ -5,6 +5,7 @@ import { ROLE_LABELS } from "@/lib/utils";
 import Link from "next/link";
 import { ClipboardCheck, KeyRound, MessageSquare, Search, Sparkles, Wrench } from "lucide-react";
 import { RoomDeskNoteFeed } from "@/components/room-desk-note-feed";
+import { isDirtyForHousekeeping, isOnInspectionList } from "@/lib/mobile-routes";
 
 export default async function MobileDashboardPage() {
   const session = await requireAuth(undefined, "/login?mobile=1&callbackUrl=/m");
@@ -31,15 +32,29 @@ export default async function MobileDashboardPage() {
     getLatestRoomDeskNotes(hotelId),
   ]);
 
-  const dirty = rooms.filter((r) => r.status === "VACANT_DIRTY" || r.status === "CLEANING").length;
+  const housekeepingRooms =
+    role === "HOUSEKEEPER" || role === "INSPECTOR"
+      ? rooms.filter(
+          (room) => room.housekeeperId === session.user.id && !isOnInspectionList(room.status, room.cleaningStatus)
+        )
+      : role === "EXECUTIVE_HOUSEKEEPER"
+        ? rooms.filter((room) => isDirtyForHousekeeping(room.status, room.cleaningStatus))
+        : rooms;
+  const dirty = housekeepingRooms.filter((room) => room.status === "VACANT_DIRTY" || room.status === "CLEANING").length;
+  const housekeepingDetail =
+    role === "HOUSEKEEPER" || role === "INSPECTOR"
+      ? `${housekeepingRooms.length} assigned · ${dirty} to clean`
+      : role === "EXECUTIVE_HOUSEKEEPER"
+        ? `${housekeepingRooms.length} dirty`
+        : `${rooms.length} rooms · ${dirty} dirty`;
 
   const cards = [
     {
       href: "/m/housekeeping",
       title: "Housekeeping",
-      detail: role === "HOUSEKEEPER" ? `${rooms.length} assigned · ${dirty} to clean` : `${rooms.length} rooms · ${dirty} dirty`,
+      detail: housekeepingDetail,
       icon: Sparkles,
-      show: ["HOUSEKEEPER", "EXECUTIVE_HOUSEKEEPER", "OWNER", "GENERAL_MANAGER"].includes(role),
+      show: ["HOUSEKEEPER", "EXECUTIVE_HOUSEKEEPER", "INSPECTOR", "OWNER", "GENERAL_MANAGER"].includes(role),
     },
     {
       href: "/m/maintenance",

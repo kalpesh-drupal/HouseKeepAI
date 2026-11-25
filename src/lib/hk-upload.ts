@@ -1,6 +1,6 @@
 import { CleaningStatus, GuestStayStatus, RoomStatus } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
-import { DEFAULT_CHECKLIST_ITEMS } from "@/lib/utils";
+import { CLEANING_STAFF_ROLES, DEFAULT_CHECKLIST_ITEMS } from "@/lib/utils";
 import { resetRoomChecklist } from "@/lib/room-inventory";
 import { getReportPms, normalizeReportKey, type ReportPmsProfile } from "@/lib/pms/report-catalog";
 import { calendarDayKey, isStayoverRoom } from "@/lib/stay";
@@ -838,7 +838,7 @@ export async function applyHkListRows(
 ): Promise<HkApplyResult> {
   const [users, hotel] = await Promise.all([
     prisma.user.findMany({
-      where: { hotelId, role: { in: ["HOUSEKEEPER", "EXECUTIVE_HOUSEKEEPER"] }, active: true },
+      where: { hotelId, role: { in: CLEANING_STAFF_ROLES }, active: true },
     }),
     prisma.hotel.findUnique({ where: { id: hotelId } }),
   ]);

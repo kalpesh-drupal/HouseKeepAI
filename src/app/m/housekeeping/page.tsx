@@ -10,14 +10,34 @@ import { activePortalProvider } from "@/lib/pms/active-provider";
 import { pmsRoomLabel } from "@/lib/pms/pms-labels";
 import { RoomDeskNotes } from "@/components/room-desk-notes";
 import { RoomDeskNoteFeed } from "@/components/room-desk-note-feed";
+import { isDirtyForHousekeeping, isOnInspectionList } from "@/lib/mobile-routes";
 
 export default async function MobileHousekeepingPage() {
   const session = await requireAuth();
-  const [rooms, pmsProvider, deskNotes] = await Promise.all([
-    getRoomsForUser(session.user.hotelId, session.user.id, session.user.role),
+  const role = session.user.role;
+  const [loadedRooms, pmsProvider, deskNotes] = await Promise.all([
+    getRoomsForUser(session.user.hotelId, session.user.id, role),
     activePortalProvider(session.user.hotelId),
     getLatestRoomDeskNotes(session.user.hotelId),
   ]);
+  const rooms = loadedRooms.filter((room) => {
+    if (isOnInspectionList(room.status, room.cleaningStatus)) return false;
+    if (role === "HOUSEKEEPER" || role === "INSPECTOR") return room.housekeeperId === session.user.id;
+    if (role === "EXECUTIVE_HOUSEKEEPER") return isDirtyForHousekeeping(room.status, room.cleaningStatus);
+    return true;
+  });
+  const visibleNotes =
+    role === "HOUSEKEEPER" || role === "INSPECTOR" || role === "EXECUTIVE_HOUSEKEEPER"
+      ? deskNotes.filter((note) => rooms.some((room) => room.id === note.roomId))
+      : deskNotes;
+  const heading =
+    role === "EXECUTIVE_HOUSEKEEPER" ? "Dirty rooms" : role === "HOUSEKEEPER" || role === "INSPECTOR" ? "Your rooms" : "Today's Rooms";
+  const summary =
+    role === "EXECUTIVE_HOUSEKEEPER"
+      ? `${rooms.length} dirty`
+      : role === "HOUSEKEEPER" || role === "INSPECTOR"
+        ? `${rooms.length} assigned to you`
+        : `${rooms.length} rooms`;
 
   return (
     <div className="space-y-4">
@@ -40,15 +60,15 @@ export default async function MobileHousekeepingPage() {
         }))}
       />
       <div>
-        <h2 className="text-xl font-bold">Today&apos;s Rooms</h2>
-        <p className="text-sm text-muted-foreground">{rooms.length} assigned</p>
+        <h2 className="text-xl font-bold">{heading}</h2>
+        <p className="text-sm text-muted-foreground">{summary}</p>
       </div>
 
-      <RoomDeskNoteFeed notes={deskNotes} poll />
+      <RoomDeskNoteFeed notes={visibleNotes} poll />
 
       {rooms.length === 0 ? (
         <div className="rounded-2xl border border-border bg-card p-8 text-center text-sm text-muted-foreground">
-          No rooms assigned
+          {role === "EXECUTIVE_HOUSEKEEPER" ? "No dirty rooms" : "No rooms assigned"}
         </div>
       ) : (
         rooms.map((room) => {
@@ -77,7 +97,7 @@ export default async function MobileHousekeepingPage() {
                   HK: {pmsRoomLabel(room.status, room.guestStatus, pmsProvider)}
                 </span>
               </div>
-              <RoomDeskNotes notes={deskNotes.filter((note) => note.roomId === room.id)} />
+              <RoomDeskNotes notes={visibleNotes.filter((note) => note.roomId === room.id)} />
               <p className={`mb-2 inline-block rounded-full px-2 py-1 text-xs font-medium ${guestStayLabel(room.guestStatus, room.status).className}`}>
                 {guestStayLabel(room.guestStatus, room.status).label}
               </p>

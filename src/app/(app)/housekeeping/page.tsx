@@ -32,7 +32,7 @@ export default async function HousekeepingPage() {
     getRoomDeskNotes(session.user.hotelId),
   ]);
   const myRooms =
-    session.user.role === "HOUSEKEEPER"
+    session.user.role === "HOUSEKEEPER" || session.user.role === "INSPECTOR"
       ? rooms
       : rooms.filter((room) => room.housekeeperId === session.user.id);
 
@@ -41,9 +41,9 @@ export default async function HousekeepingPage() {
       <div>
         <h1 className="text-3xl font-bold">Housekeeping</h1>
         <p className="text-muted-foreground">
-          {session.user.role === "HOUSEKEEPER"
+          {session.user.role === "HOUSEKEEPER" || session.user.role === "INSPECTOR"
             ? "Your assigned rooms for today"
-            : "Assign rooms to housekeepers manually or with AI, then track cleaning."}
+            : "Assign rooms to housekeepers, the executive housekeeper, or an inspector, then track cleaning."}
         </p>
       </div>
 
@@ -93,14 +93,14 @@ export default async function HousekeepingPage() {
         </section>
       )}
 
-      {(session.user.role === "HOUSEKEEPER" || (isCleaningStaff(session.user.role) && myRooms.length > 0)) && (
+      {(session.user.role === "HOUSEKEEPER" || session.user.role === "INSPECTOR" || (isCleaningStaff(session.user.role) && myRooms.length > 0)) && (
         myRooms.length === 0 ? (
           <div className="rounded-2xl border border-border bg-card p-12 text-center">
             <p className="text-muted-foreground">No rooms assigned.</p>
           </div>
         ) : (
         <div className="space-y-6">
-          {session.user.role !== "HOUSEKEEPER" && (
+          {session.user.role !== "HOUSEKEEPER" && session.user.role !== "INSPECTOR" && (
             <div>
               <h2 className="text-xl font-semibold">Your rooms</h2>
               <p className="text-sm text-muted-foreground">Rooms assigned to you. Start cleaning, then mark them clean or ready to inspect.</p>

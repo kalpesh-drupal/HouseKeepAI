@@ -3,7 +3,7 @@ import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { buildAiInsights } from "@/lib/ai";
 import { prisma } from "@/lib/prisma";
-import { canAssignHousekeepers } from "@/lib/utils";
+import { canAssignHousekeepers, CLEANING_STAFF_ROLES } from "@/lib/utils";
 
 /** Apply AI staff assignment suggestions to unassigned priority rooms. */
 export async function POST() {
@@ -15,7 +15,7 @@ export async function POST() {
 
   const insights = await buildAiInsights(session.user.hotelId);
   const housekeepers = await prisma.user.findMany({
-    where: { hotelId: session.user.hotelId, role: { in: ["HOUSEKEEPER", "EXECUTIVE_HOUSEKEEPER"] }, active: true },
+    where: { hotelId: session.user.hotelId, role: { in: CLEANING_STAFF_ROLES }, active: true },
   });
 
   let assigned = 0;

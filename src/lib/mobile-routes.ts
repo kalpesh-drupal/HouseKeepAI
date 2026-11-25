@@ -39,6 +39,17 @@ export function canFinishCleaning(status: RoomStatus, cleaningStatus: CleaningSt
   return status === RoomStatus.CLEANING || cleaningStatus === CleaningStatus.IN_PROGRESS;
 }
 
+/** Room is on the inspection list, not the housekeeping work list. */
+export function isOnInspectionList(status: RoomStatus, cleaningStatus: CleaningStatus) {
+  return status === RoomStatus.READY_TO_INSPECT || cleaningStatus === CleaningStatus.NEEDS_INSPECTION;
+}
+
+/** Vacant dirty or currently being cleaned, and not already sent for inspection. */
+export function isDirtyForHousekeeping(status: RoomStatus, cleaningStatus: CleaningStatus) {
+  if (isOnInspectionList(status, cleaningStatus)) return false;
+  return status === RoomStatus.VACANT_DIRTY || status === RoomStatus.CLEANING;
+}
+
 /** Dirty rooms and rooms already being cleaned can be marked clean or ready to inspect. */
 export function canChooseCleanOutcome(status: RoomStatus, cleaningStatus: CleaningStatus) {
   if (

@@ -9,8 +9,10 @@ export default async function MobileInspectionPage() {
   return (
     <div className="space-y-4">
       <div>
-        <h2 className="text-xl font-bold">Ready to inspect</h2>
-        <p className="text-sm text-muted-foreground">{rooms.length} rooms waiting</p>
+        <h2 className="text-xl font-bold">Rooms to inspect</h2>
+        <p className="text-sm text-muted-foreground">
+          {`${rooms.length} ${rooms.length === 1 ? "room" : "rooms"} housekeepers marked ready to inspect`}
+        </p>
       </div>
       <ReadyToInspectList
         rooms={rooms.map((room) => ({

@@ -1,6 +1,6 @@
 import { prisma } from "./prisma";
 import { RoomStatus, CleaningStatus } from "@prisma/client";
-import { getStockAlert } from "./utils";
+import { CLEANING_STAFF_ROLES, getStockAlert } from "./utils";
 
 export type AiPriorityRoom = {
   id: string;
@@ -41,7 +41,7 @@ export async function buildAiInsights(hotelId: string): Promise<AiInsights> {
       },
     }),
     prisma.user.findMany({
-      where: { hotelId, role: { in: ["HOUSEKEEPER", "EXECUTIVE_HOUSEKEEPER"] }, active: true },
+      where: { hotelId, role: { in: CLEANING_STAFF_ROLES }, active: true },
       select: { id: true, name: true },
     }),
     prisma.maintenanceTicket.findMany({ where: { hotelId }, include: { room: true } }),
